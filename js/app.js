@@ -12,6 +12,8 @@
   let currentSort = { key: 'time', asc: false };
   let currentPage = 1;
   let selectedFeature = null;
+  let lastSearchType = 'manual';  // 'manual' | 'quick'
+  let lastQuickType = null;       // '24h-4.5' 等
   const PAGE_SIZE = 50;
 
   // --- DOM要素 ---
@@ -54,7 +56,13 @@
 
     // 拡張モジュール初期化
     Settings.initDarkMode();
-    Settings.initAutoRefresh(() => executeSearch());
+    Settings.initAutoRefresh(() => {
+      if (lastSearchType === 'quick' && lastQuickType) {
+        quickSearch(lastQuickType);
+      } else {
+        executeSearch();
+      }
+    });
     Settings.initSavedSearches();
     Settings.initShare();
     Settings.onThemeChange(() => Charts.refreshTheme(currentData));
@@ -107,7 +115,11 @@
     initWaveformViewer();
 
     // URL共有パラメータからの復元と自動検索
-    if (Settings.restoreFromURL()) {
+    const restored = Settings.restoreFromURL();
+    if (restored === 'quick') {
+      const qt = Settings.getActiveQuickType();
+      if (qt) setTimeout(() => quickSearch(qt), 300);
+    } else if (restored === 'manual') {
       setTimeout(executeSearch, 300);
     }
   }
@@ -122,6 +134,9 @@
 
     try {
       const data = await EarthquakeAPI.search(params);
+      lastSearchType = 'manual';
+      lastQuickType = null;
+      Settings.setActiveQuickType(null);
       handleResults(data);
     } catch (err) {
       showError(err.message);
@@ -131,30 +146,32 @@
   }
 
   // --- クイック検索 ---
+  // プリセット定義（ローリング時間帯と正確なマグニチュード閾値）
+  const quickPresets = {
+    '24h-4.5':  { hours: 24,   minMag: 4.5, limit: 200, label: '24時間 M4.5+' },
+    '7d-5.0':   { hours: 168,  minMag: 5.0, limit: 200, label: '7日間 M5.0+' },
+    '30d-6.0':  { hours: 720,  minMag: 6.0, limit: 200, label: '30日間 M6.0+' },
+    '365d-7.0': { hours: 8760, minMag: 7.0, limit: 500, label: '1年間 M7.0+' },
+  };
+
   async function quickSearch(type) {
-    // フォーム値を同期させてから検索
-    const presets = {
-      '24h-4.5':  { hours: 24,   minmag: '4', limit: '200' },
-      '7d-5.0':   { hours: 168,  minmag: '5', limit: '200' },
-      '30d-6.0':  { hours: 720,  minmag: '6', limit: '200' },
-      '365d-7.0': { hours: 8760, minmag: '7', limit: '500' },
-    };
-    const preset = presets[type];
+    const preset = quickPresets[type];
     if (!preset) return;
 
-    // フォームに反映
-    const now = new Date();
-    const start = new Date(now.getTime() - preset.hours * 60 * 60 * 1000);
-    els.startdate.value = formatDateInput(start);
-    els.enddate.value = formatDateInput(now);
-    els.minmag.value = preset.minmag;
-    els.maxdepth.value = '';
-    els.region.value = 'global';
-    els.limit.value = preset.limit;
-    els.customBounds.style.display = 'none';
+    showLoading(true);
+    clearError();
 
-    // フォーム経由で検索実行（自動更新・共有URL・保存条件と一致）
-    await executeSearch();
+    try {
+      const data = await EarthquakeAPI.recentSearch(preset.hours, preset.minMag, preset.limit);
+      lastSearchType = 'quick';
+      lastQuickType = type;
+      Settings.setActiveQuickType(type);
+      handleResults(data);
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      showLoading(false);
+    }
   }
 
   // --- 検索パラメータ組み立て ---

@@ -7,6 +7,7 @@ const Settings = (() => {
   let autoRefreshTimer = null;
   let autoRefreshCallback = null;
   let themeChangeCallback = null;
+  let activeQuickType = null; // クイック検索種別 (null = フォーム検索)
 
   // ===== ダークモード =====
   function initDarkMode() {
@@ -169,8 +170,16 @@ const Settings = (() => {
     });
   }
 
+  function setActiveQuickType(type) {
+    activeQuickType = type || null;
+  }
+
+  function getActiveQuickType() {
+    return activeQuickType;
+  }
+
   function getCurrentSearchParams() {
-    return {
+    const params = {
       startdate: document.getElementById('startdate')?.value || '',
       enddate: document.getElementById('enddate')?.value || '',
       minmag: document.getElementById('minmag')?.value || '',
@@ -182,6 +191,11 @@ const Settings = (() => {
       minlon: document.getElementById('custom-minlon')?.value || '',
       maxlon: document.getElementById('custom-maxlon')?.value || '',
     };
+    // クイック検索の場合はその種別も記録
+    if (activeQuickType) {
+      params.quick = activeQuickType;
+    }
+    return params;
   }
 
   function applySearchParams(params) {
@@ -233,6 +247,13 @@ const Settings = (() => {
     const params = new URLSearchParams(location.search);
     if (params.toString() === '') return false;
 
+    // クイック検索パラメータ優先
+    const quickType = params.get('quick');
+    if (quickType) {
+      activeQuickType = quickType;
+      return 'quick';
+    }
+
     const mapping = {
       startdate: 'startdate', enddate: 'enddate', minmag: 'minmag',
       maxdepth: 'maxdepth', region: 'region', limit: 'limit',
@@ -251,7 +272,7 @@ const Settings = (() => {
 
     if (hasAny) {
       applySearchParams(restored);
-      return true;
+      return 'manual';
     }
     return false;
   }
@@ -284,6 +305,8 @@ const Settings = (() => {
     showToast,
     getCurrentSearchParams,
     applySearchParams,
+    setActiveQuickType,
+    getActiveQuickType,
     onThemeChange,
   };
 })();
