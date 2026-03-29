@@ -7,7 +7,7 @@
 
 [USGS (アメリカ地質調査所) Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) から取得した地震データを、日本語に変換して表示します。地名・方角・専門用語を辞書ベースで翻訳し、英語が苦手な方でも直感的に利用できるよう設計しています。
 
-**本アプリは情報の閲覧・取得を目的としたツールです。防災上の判断には、必ず[気象庁](https://www.jma.go.jp/bosai/quake/)等の公式情報をご確認ください。**
+**本アプリは情報の閲覧・取得を目的としたツールです。防災上の判断には、必ず[気象庁](https://www.jma.go.jp/bosai/map.html#contents=earthquake_information)等の公式情報をご確認ください。**
 
 ## 機能
 
