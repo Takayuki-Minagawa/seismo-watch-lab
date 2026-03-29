@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SeismoWatch Lab - 世界の地震データ検索</title>
+  <meta name="description" content="世界の地震データをリアルタイムに検索・日本語表示・ダウンロードできる静的Webアプリ。USGS・気象庁・防災科研の情報を活用。">
+
+  <!-- Leaflet CSS (BSD-2-Clause) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin="anonymous">
+
+  <!-- アプリCSS -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ========== ヘッダー ========== -->
+  <header class="header">
+    <div class="header-inner">
+      <h1>
+        SeismoWatch Lab
+        <span class="header-subtitle">- 世界の地震データを日本語で検索・取得</span>
+      </h1>
+      <span class="header-badge">USGS API + 日本語化</span>
+    </div>
+  </header>
+
+  <!-- ========== ローディング ========== -->
+  <div id="loading" class="loading-overlay">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <div>地震データを取得中...</div>
+    </div>
+  </div>
+
+  <!-- ========== メインコンテンツ ========== -->
+  <main class="main">
+
+    <!-- 検索パネル -->
+    <section class="card search-panel">
+      <div class="card-header">
+        <span>&#x1F50D;</span> 検索条件
+      </div>
+      <div class="card-body">
+        <div class="search-grid">
+          <div class="form-group">
+            <label for="startdate">開始日</label>
+            <input type="date" id="startdate">
+          </div>
+          <div class="form-group">
+            <label for="enddate">終了日</label>
+            <input type="date" id="enddate">
+          </div>
+          <div class="form-group">
+            <label for="minmag">最小マグニチュード</label>
+            <select id="minmag">
+              <option value="1">M1.0 以上</option>
+              <option value="2">M2.0 以上</option>
+              <option value="3">M3.0 以上</option>
+              <option value="4" selected>M4.0 以上</option>
+              <option value="5">M5.0 以上</option>
+              <option value="6">M6.0 以上</option>
+              <option value="7">M7.0 以上</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="maxdepth">最大深さ (km)</label>
+            <input type="number" id="maxdepth" placeholder="例: 300" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label for="region">地域</label>
+            <select id="region">
+              <option value="global">世界全体</option>
+              <option value="japan">日本周辺</option>
+              <option value="pacific">環太平洋</option>
+              <option value="southeast_asia">東南アジア</option>
+              <option value="south_america">南米</option>
+              <option value="mediterranean">地中海</option>
+              <option value="central_asia">中央アジア</option>
+              <option value="custom">カスタム範囲</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="limit">最大取得件数</label>
+            <select id="limit">
+              <option value="50">50件</option>
+              <option value="100">100件</option>
+              <option value="200" selected>200件</option>
+              <option value="500">500件</option>
+              <option value="1000">1000件</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- カスタム範囲（初期非表示） -->
+        <div id="custom-bounds" class="search-grid" style="display:none; margin-top:0.75rem;">
+          <div class="form-group">
+            <label for="custom-minlat">南端 緯度</label>
+            <input type="number" id="custom-minlat" step="0.1" placeholder="-90 ~ 90">
+          </div>
+          <div class="form-group">
+            <label for="custom-maxlat">北端 緯度</label>
+            <input type="number" id="custom-maxlat" step="0.1" placeholder="-90 ~ 90">
+          </div>
+          <div class="form-group">
+            <label for="custom-minlon">西端 経度</label>
+            <input type="number" id="custom-minlon" step="0.1" placeholder="-180 ~ 180">
+          </div>
+          <div class="form-group">
+            <label for="custom-maxlon">東端 経度</label>
+            <input type="number" id="custom-maxlon" step="0.1" placeholder="-180 ~ 180">
+          </div>
+        </div>
+
+        <!-- 検索ボタン＆クイック検索 -->
+        <div class="search-actions">
+          <button class="btn btn-primary" id="btn-search">検索</button>
+          <button class="btn btn-secondary" id="btn-reset">条件リセット</button>
+          <div class="quick-buttons">
+            <span class="label">クイック:</span>
+            <button class="btn btn-outline btn-sm" data-quick="24h-4.5">24時間 M4.5+</button>
+            <button class="btn btn-outline btn-sm" data-quick="7d-5.0">7日間 M5.0+</button>
+            <button class="btn btn-outline btn-sm" data-quick="30d-6.0">30日間 M6.0+</button>
+            <button class="btn btn-outline btn-sm" data-quick="365d-7.0">1年間 M7.0+</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 地図セクション -->
+    <section class="card">
+      <div class="card-header">
+        <span>&#x1F5FA;</span> 震央マップ
+      </div>
+      <div class="legend">
+        <span class="legend-title">マグニチュード:</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#48bb78"></span> &lt;3</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#a0c45a"></span> 3-4</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#ecc94b"></span> 4-5</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#ed8936"></span> 5-6</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#e53e3e"></span> 6-7</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#9b2c2c"></span> 7-8</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#4a0000"></span> 8+</span>
+      </div>
+      <div id="map" class="map-container"></div>
+    </section>
+
+    <!-- 結果テーブルセクション -->
+    <section class="card" id="results-section">
+      <div class="results-bar">
+        <span class="results-count" id="results-count">検索結果: --</span>
+        <div class="download-buttons">
+          <button class="btn btn-sm btn-outline" id="btn-csv" disabled>CSV</button>
+          <button class="btn btn-sm btn-outline" id="btn-json" disabled>JSON</button>
+          <button class="btn btn-sm btn-outline" id="btn-geojson" disabled>GeoJSON</button>
+        </div>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="eq-table" id="eq-table">
+          <thead>
+            <tr>
+              <th data-sort="time" class="col-time sorted">発生日時 (JST) <span class="sort-icon">&#9660;</span></th>
+              <th data-sort="mag" class="col-mag">M <span class="sort-icon">&#9650;&#9660;</span></th>
+              <th data-sort="depth" class="col-depth">深さ (km) <span class="sort-icon">&#9650;&#9660;</span></th>
+              <th data-sort="place" class="col-place">震央 <span class="sort-icon">&#9650;&#9660;</span></th>
+              <th>津波</th>
+              <th>状態</th>
+              <th>詳細</th>
+            </tr>
+          </thead>
+          <tbody id="eq-tbody">
+            <tr>
+              <td colspan="7">
+                <div class="empty-state">
+                  <div class="icon">&#x1F30D;</div>
+                  <div>検索条件を指定して「検索」ボタンを押してください</div>
+                  <div style="margin-top:0.5rem; font-size:0.8rem;">
+                    またはクイック検索ボタンで最近の地震を表示できます
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ページネーション -->
+      <div class="pagination" id="pagination" style="display:none;">
+        <button class="btn btn-sm btn-outline" id="page-prev">前へ</button>
+        <span id="page-info">1 / 1</span>
+        <button class="btn btn-sm btn-outline" id="page-next">次へ</button>
+      </div>
+    </section>
+
+    <!-- 参考リンクセクション -->
+    <section class="card">
+      <div class="card-header">
+        <span>&#x1F4DA;</span> 参考情報リンク
+      </div>
+      <div class="card-body">
+        <div class="resources-grid">
+          <!-- 気象庁 -->
+          <div class="resource-item">
+            <h3>
+              <a href="https://www.jma.go.jp/bosai/quake/" target="_blank" rel="noopener">気象庁 地震情報</a>
+              <span class="resource-tag">JMA</span>
+            </h3>
+            <p>日本国内の地震情報をリアルタイムで提供。震度分布図や各地の震度一覧を確認できます。</p>
+          </div>
+          <div class="resource-item">
+            <h3>
+              <a href="https://www.data.jma.go.jp/svd/eqdb/data/shindo/" target="_blank" rel="noopener">気象庁 震度データベース</a>
+              <span class="resource-tag">JMA</span>
+            </h3>
+            <p>過去の地震の震度データを検索可能。地点・期間を指定して詳細な震度情報を取得できます。</p>
+          </div>
+          <div class="resource-item">
+            <h3>
+              <a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_map" target="_blank" rel="noopener">気象庁 震央分布図</a>
+              <span class="resource-tag">JMA</span>
+            </h3>
+            <p>日本周辺の震央分布を地図上で視覚的に確認できるインタラクティブマップです。</p>
+          </div>
+
+          <!-- 防災科研 -->
+          <div class="resource-item">
+            <h3>
+              <a href="https://www.kyoshin.bosai.go.jp/" target="_blank" rel="noopener">強震観測網 K-NET / KiK-net</a>
+              <span class="resource-tag">NIED</span>
+            </h3>
+            <p>防災科学技術研究所の強震観測網。加速度波形データのダウンロードが可能（要ユーザー登録）。構造計算等に活用できます。</p>
+          </div>
+          <div class="resource-item">
+            <h3>
+              <a href="https://www.hinet.bosai.go.jp/" target="_blank" rel="noopener">高感度地震観測網 Hi-net</a>
+              <span class="resource-tag">NIED</span>
+            </h3>
+            <p>日本全国約800か所の高感度地震計で観測。連続波形データや自動処理震源リストを提供しています。</p>
+          </div>
+          <div class="resource-item">
+            <h3>
+              <a href="https://www.j-shis.bosai.go.jp/" target="_blank" rel="noopener">地震ハザードステーション J-SHIS</a>
+              <span class="resource-tag">NIED</span>
+            </h3>
+            <p>全国の地震動予測地図や各地点の地震ハザード情報を閲覧可能。建築設計の参考資料として活用されています。</p>
+          </div>
+
+          <!-- USGS -->
+          <div class="resource-item">
+            <h3>
+              <a href="https://earthquake.usgs.gov/earthquakes/map/" target="_blank" rel="noopener">USGS 地震マップ</a>
+              <span class="resource-tag">USGS</span>
+            </h3>
+            <p>アメリカ地質調査所の世界地震マップ。本アプリのデータソースです。リアルタイムの地震情報を提供しています。</p>
+          </div>
+          <div class="resource-item">
+            <h3>
+              <a href="https://earthquake.usgs.gov/fdsnws/event/1/" target="_blank" rel="noopener">USGS Earthquake API</a>
+              <span class="resource-tag">API</span>
+            </h3>
+            <p>本アプリが利用しているAPI。GeoJSON形式で世界中の地震データを無料で取得可能。パブリックドメインです。</p>
+          </div>
+          <div class="resource-item">
+            <h3>
+              <a href="https://www.emsc-csem.org/" target="_blank" rel="noopener">EMSC (欧州地中海地震学センター)</a>
+              <span class="resource-tag">EU</span>
+            </h3>
+            <p>ヨーロッパ・地中海地域の地震情報を提供。体感報告や各国の地震速報も確認できます。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ========== フッター ========== -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-grid">
+        <div>
+          <h4>データ出典</h4>
+          <p>
+            地震データ: <a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener">USGS (U.S. Geological Survey)</a> - パブリックドメイン<br>
+            地図タイル: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors (ODbL)<br>
+            地図ライブラリ: <a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet</a> (BSD-2-Clause)
+          </p>
+        </div>
+        <div>
+          <h4>ライセンス・免責事項</h4>
+          <p>
+            本アプリは <a href="LICENSE">MIT License</a> のもとで公開されています。<br>
+            表示されるデータの正確性は保証されません。防災判断には必ず<a href="https://www.jma.go.jp/bosai/quake/" target="_blank" rel="noopener">気象庁</a>等の公式情報を参照してください。
+          </p>
+        </div>
+        <div>
+          <h4>SeismoWatch Lab</h4>
+          <p>
+            世界の地震データを日本語で検索・取得できる静的Webアプリケーション。<br>
+            サーバー不要・完全ブラウザ動作。GitHub Pagesで公開。
+          </p>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ========== Scripts ========== -->
+  <!-- Leaflet JS (BSD-2-Clause) -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin="anonymous"></script>
+
+  <!-- アプリモジュール -->
+  <script src="js/i18n.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/download.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
