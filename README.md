@@ -16,6 +16,8 @@
 - 地域プリセット（日本周辺、環太平洋、東南アジア、南米、地中海、中央アジア）
 - 緯度・経度の範囲を直接指定するカスタム検索
 - ワンクリックで最近の地震を取得できるクイック検索
+- 検索条件の保存・読み込み（LocalStorage）
+- 検索結果のURL共有（共有URLをクリップボードにコピー）
 
 ### 日本語表示
 - 約100か国の国名を日本語に変換
@@ -28,10 +30,49 @@
 - マグニチュードに応じた色分け・サイズ分けマーカー
 - マーカークリックで日本語の詳細情報を表示
 
+### 地震詳細パネル
+- テーブル行クリックで詳細情報をスライドインパネルで表示
+- マグニチュード・震源深さ・座標・発生時刻（JST/UTC）等を表示
+- 津波警報情報の表示
+- 日本周辺の地震には気象庁・K-NETへのリンクを表示
+- 地図フォーカス・波形ビューアとの連携
+
+### 統計グラフ
+- Chart.jsによるインタラクティブなグラフ表示
+- マグニチュード分布（棒グラフ）
+- 深さ分布（棒グラフ）
+- 地震発生タイムライン（散布図：時間 vs マグニチュード）
+- マグニチュード vs 深さ（散布図）
+
+### 応答スペクトル計算
+- K-NET形式およびCSVファイルの読み込み
+- Newmark-β法による応答スペクトル計算
+- 入力波形と計算結果スペクトルの表示
+- 減衰定数の設定（複数指定可）
+- Sa（加速度）・Sv（速度）・Sd（変位）の3種類の出力
+
+### IRIS波形ビューア
+- IRIS (NSF SAGE) FDSN Web Servicesとの連携
+- 震央周辺の観測局検索（探索半径: 2°〜20°）
+- 選択した観測局の地震波形データを表示
+
 ### データダウンロード
 - **CSV** : BOM付きUTF-8でExcelに対応、日本語カラム名
 - **JSON** : 日本語ラベル付きの整形済みデータ
 - **GeoJSON** : GISソフトウェアで利用可能な形式
+
+### ダークモード
+- ヘッダーのトグルボタンでライト/ダークモードを切り替え
+- グラフ・地図を含む全UIコンポーネントが連動
+- 設定はLocalStorageに保存
+
+### 自動更新
+- 更新間隔を選択可能（1分・5分・15分）
+- 直前の検索条件を自動で再実行
+
+### PWA対応
+- Service Workerによるオフラインサポート
+- ホーム画面への追加・スタンドアロンアプリとしてインストール可能
 
 ### 参考情報リンク
 気象庁・防災科学技術研究所・USGS等の関連情報へのリンクを掲載しています。
@@ -42,8 +83,10 @@
 |------|------|
 | フロントエンド | HTML / CSS / JavaScript (Vanilla JS) |
 | 地図ライブラリ | [Leaflet](https://leafletjs.com/) 1.9.4 |
+| グラフライブラリ | [Chart.js](https://www.chartjs.org/) 4.4.7 |
 | 地図タイル | [OpenStreetMap](https://www.openstreetmap.org/) |
-| データソース | [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) |
+| データソース | [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/)、[IRIS FDSN Web Services](https://service.iris.edu/) |
+| PWA | Service Worker によるオフラインサポート |
 | ホスティング | GitHub Pages |
 | ビルドツール | 不要（静的ファイルのみ） |
 
@@ -78,13 +121,14 @@ npx serve .
 |------|------|------------|
 | [USGS Earthquake Hazards Program](https://earthquake.usgs.gov/) | 地震データ | パブリックドメイン |
 | [Leaflet](https://leafletjs.com/) | 地図表示ライブラリ | BSD-2-Clause |
+| [Chart.js](https://www.chartjs.org/) | グラフ表示ライブラリ | MIT |
 | [OpenStreetMap](https://www.openstreetmap.org/copyright) | 地図タイル | ODbL (帰属表示必須) |
 
 ### 参考情報として掲載している外部サイト
 
 - [気象庁](https://www.jma.go.jp/) - 地震情報、震度データベース、震央分布図
 - [防災科学技術研究所 (NIED)](https://www.bosai.go.jp/) - K-NET/KiK-net、Hi-net、J-SHIS
-- [IRIS / NSF SAGE](https://www.iris.edu/hq/) - Seismic Monitor、Web Services (FDSN)、Data Management Center
+- [IRIS / NSF SAGE](https://www.iris.edu/hq/) - Seismic Monitor、Web Services (FDSN)、Data Management Center（波形ビューアで利用）
 - [EMSC (欧州地中海地震学センター)](https://www.emsc-csem.org/)
 
 各外部サイトのデータ利用については、それぞれの利用規約に従ってください。
