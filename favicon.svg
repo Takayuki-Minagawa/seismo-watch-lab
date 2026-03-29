@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a365d"/>
+      <stop offset="100%" stop-color="#2a4a7f"/>
+    </linearGradient>
+  </defs>
+  <!-- 背景円 -->
+  <circle cx="32" cy="32" r="30" fill="url(#bg)"/>
+  <!-- 地震波リング -->
+  <circle cx="32" cy="32" r="22" fill="none" stroke="#fc8181" stroke-width="1.5" opacity="0.3"/>
+  <circle cx="32" cy="32" r="16" fill="none" stroke="#fc8181" stroke-width="1.5" opacity="0.5"/>
+  <circle cx="32" cy="32" r="10" fill="none" stroke="#fc8181" stroke-width="1.5" opacity="0.7"/>
+  <!-- 地震波形（中央の折れ線） -->
+  <polyline points="8,32 18,32 22,22 26,42 30,18 34,46 38,24 42,38 46,32 56,32"
+    fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 震央ドット -->
+  <circle cx="32" cy="32" r="3" fill="#e53e3e"/>
+</svg>
