@@ -6,6 +6,7 @@ const Settings = (() => {
   const STORAGE_KEY_SAVED = 'seismo-saved-searches';
   let autoRefreshTimer = null;
   let autoRefreshCallback = null;
+  let themeChangeCallback = null;
 
   // ===== ダークモード =====
   function initDarkMode() {
@@ -29,6 +30,7 @@ const Settings = (() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(STORAGE_KEY_THEME, theme);
     updateDarkModeButton();
+    if (themeChangeCallback) themeChangeCallback();
   }
 
   function updateDarkModeButton() {
@@ -268,6 +270,10 @@ const Settings = (() => {
     setTimeout(() => toast.classList.remove('show'), 2500);
   }
 
+  function onThemeChange(callback) {
+    themeChangeCallback = callback;
+  }
+
   return {
     initDarkMode,
     initAutoRefresh,
@@ -278,5 +284,6 @@ const Settings = (() => {
     showToast,
     getCurrentSearchParams,
     applySearchParams,
+    onThemeChange,
   };
 })();

@@ -52,7 +52,7 @@
   <div id="detail-overlay" class="detail-overlay"></div>
   <aside id="detail-panel" class="detail-panel">
     <div class="detail-panel-header">
-      <h2>地��詳細情報</h2>
+      <h2>地震詳細情報</h2>
       <button id="detail-close" class="detail-close">&#x2715;</button>
     </div>
     <div id="detail-content"></div>
@@ -181,7 +181,7 @@
     <!-- 結果テーブルセクション -->
     <section class="card" id="results-section">
       <div class="results-bar">
-        <span class="results-count" id="results-count">検索���果: --</span>
+        <span class="results-count" id="results-count">検索結果: --</span>
         <div class="download-buttons">
           <button class="btn btn-sm btn-outline" id="btn-csv" disabled>CSV</button>
           <button class="btn btn-sm btn-outline" id="btn-json" disabled>JSON</button>
@@ -207,7 +207,7 @@
               <td colspan="7">
                 <div class="empty-state">
                   <div class="icon">&#x1F30D;</div>
-                  <div>検���条件を指定して「検索」ボタンを押してください</div>
+                  <div>検索条件を指定して「検索」ボタンを押してください</div>
                   <div style="margin-top:0.5rem; font-size:0.8rem;">
                     またはクイック検索ボタンで最近の地震を表示できます
                   </div>
@@ -218,7 +218,7 @@
         </table>
       </div>
 
-      <!-- ページネーシ��ン -->
+      <!-- ページネーション -->
       <div class="pagination" id="pagination" style="display:none;">
         <button class="btn btn-sm btn-outline" id="page-prev">前へ</button>
         <span id="page-info">1 / 1</span>
@@ -226,7 +226,7 @@
       </div>
     </section>
 
-    <!-- ========== 分析ツールセクシ��ン ========== -->
+    <!-- ========== 分析ツールセクション ========== -->
     <section class="card" id="analysis-section">
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="stats">統計グラフ</button>
@@ -250,7 +250,7 @@
       <!-- 応答スペクトルタブ -->
       <div class="tab-content hidden" id="tab-spectrum">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          K-NET形式またはCSV形式の加速度データファイルを読み込み、応答スペクトルを計算し��す。
+          K-NET形式またはCSV形式の加速度データファイルを読み込み、応答スペクトルを計算します。
         </p>
         <div class="spectrum-controls">
           <div class="form-group">
@@ -288,11 +288,11 @@
         <div class="spectrum-info" id="spectrum-info" style="display:none;"></div>
       </div>
 
-      <!-- 波形ビュ���アタブ -->
+      <!-- 波形ビューアタブ -->
       <div class="tab-content hidden" id="tab-waveform">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
           IRIS (NSF SAGE) のデータサービスを利用して、選択した地震の波形を表示します。
-          結果テーブルの行をクリックして地震を選択してく���さい。
+          結果テーブルの行をクリックして地震を選択してください。
         </p>
         <div class="waveform-controls">
           <div class="form-group">
@@ -344,7 +344,7 @@
               <a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_information" target="_blank" rel="noopener">気象庁 地震情報</a>
               <span class="resource-tag">JMA</span>
             </h3>
-            <p>日本国内の地震���報をリアルタイムで提供。震度分布図や各地��震度一覧を地図上で確認できます。</p>
+            <p>日本国内の地震情報をリアルタイムで提供。震度分布図や各地の震度一覧を地図上で確認できます。</p>
           </div>
           <div class="resource-item">
             <h3>
@@ -355,7 +355,7 @@
           </div>
           <div class="resource-item">
             <h3>
-              <a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_map" target="_blank" rel="noopener">気象庁 震央分��図</a>
+              <a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_map" target="_blank" rel="noopener">気象庁 震央分布図</a>
               <span class="resource-tag">JMA</span>
             </h3>
             <p>日本周辺の震央分布を地図上で視覚的に確認できるインタラクティブマップです。</p>
@@ -367,21 +367,21 @@
               <a href="https://www.kyoshin.bosai.go.jp/" target="_blank" rel="noopener">強震観測網 K-NET / KiK-net</a>
               <span class="resource-tag">NIED</span>
             </h3>
-            <p>防災科学技���研究所の強震観測網。加速度波形データのダウンロ���ドが可能（要ユーザー登録）。構造計算等に活用できます。</p>
+            <p>防災科学技術研究所の強震観測網。加速度波形データのダウンロードが可能（要ユーザー登録）。構造計算等に活用できます。</p>
           </div>
           <div class="resource-item">
             <h3>
               <a href="https://www.hinet.bosai.go.jp/" target="_blank" rel="noopener">高感度地震観測網 Hi-net</a>
               <span class="resource-tag">NIED</span>
             </h3>
-            <p>日本全国約800か所の��感度地震計で観測。連続���形データや自動処理震源リストを提供しています。</p>
+            <p>日本全国約800か所の高感度地震計で観測。連続波形データや自動処理震源リストを提供しています。</p>
           </div>
           <div class="resource-item">
             <h3>
               <a href="https://www.j-shis.bosai.go.jp/" target="_blank" rel="noopener">地震ハザードステーション J-SHIS</a>
               <span class="resource-tag">NIED</span>
             </h3>
-            <p>全国の地震動予測地図や��地点の地震ハザード情報を閲覧可能。建築設計の参考資料として活用されています。</p>
+            <p>全国の地震動予測地図や各地点の地震ハザード情報を閲覧可能。建築設計の参考資料として活用されています。</p>
           </div>
 
           <!-- USGS -->
@@ -390,7 +390,7 @@
               <a href="https://earthquake.usgs.gov/earthquakes/map/" target="_blank" rel="noopener">USGS 地震マップ</a>
               <span class="resource-tag">USGS</span>
             </h3>
-            <p>アメリカ地質調査所の世界地震マップ。本アプリのデータソースです。リアルタイムの地震情報を提供しています���</p>
+            <p>アメリカ地質調査所の世界地震マップ。本アプリのデータソースです。リアルタイムの地震情報を提供しています。</p>
           </div>
           <div class="resource-item">
             <h3>
@@ -413,21 +413,21 @@
               <a href="https://iris.edu/app/seismic-monitor/" target="_blank" rel="noopener">IRIS Seismic Monitor</a>
               <span class="resource-tag">IRIS</span>
             </h3>
-            <p>世界の地震をリアルタイ���で地図表示するモニター。NSF SAGE (旧IRIS) が運営する地震観測の可視化ツールです。</p>
+            <p>世界の地震をリアルタイムで地図表示するモニター。NSF SAGE (旧IRIS) が運営する地震観測の可視化ツールです。</p>
           </div>
           <div class="resource-item">
             <h3>
               <a href="https://service.iris.edu/" target="_blank" rel="noopener">IRIS Web Services (FDSN)</a>
               <span class="resource-tag">API</span>
             </h3>
-            <p>地震波形データ・観測点情報・走時計算等のAPIを提供。研究用途の地震データ取得に広く利用されて���ます。</p>
+            <p>地震波形データ・観測点情報・走時計算等のAPIを提供。研究用途の地震データ取得に広く利用されています。</p>
           </div>
           <div class="resource-item">
             <h3>
               <a href="https://ds.iris.edu/ds/nodes/dmc/" target="_blank" rel="noopener">IRIS Data Management Center</a>
               <span class="resource-tag">IRIS</span>
             </h3>
-            <p>世界中の地震観測データを収集・管理・配��するデータセンター。波形データの検索・ダウンロードが可能です。</p>
+            <p>世界中の地震観測データを収集・管理・配信するデータセンター。波形データの検索・ダウンロードが可能です。</p>
           </div>
         </div>
       </div>
@@ -442,24 +442,24 @@
         <div>
           <h4>データ出典</h4>
           <p>
-            地震データ: <a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener">USGS (U.S. Geological Survey)</a> - パブリックドメ���ン<br>
+            地震データ: <a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener">USGS (U.S. Geological Survey)</a> - パブリックドメイン<br>
             波形データ: <a href="https://service.iris.edu/" target="_blank" rel="noopener">IRIS / NSF SAGE</a><br>
             地図タイル: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors (ODbL)<br>
-            地図ライブラリ: <a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet</a> (BSD-2-Clause) / グラ���: <a href="https://www.chartjs.org/" target="_blank" rel="noopener">Chart.js</a> (MIT)
+            地図ライブラリ: <a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet</a> (BSD-2-Clause) / グラフ: <a href="https://www.chartjs.org/" target="_blank" rel="noopener">Chart.js</a> (MIT)
           </p>
         </div>
         <div>
           <h4>ライセンス・免責事項</h4>
           <p>
-            本ア���リは <a href="LICENSE">MIT License</a> のもとで公開され��います。<br>
-            表示されるデータ���正確性は保証されません。防災判断には必ず<a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_information" target="_blank" rel="noopener">気象庁</a>等の公式情報を参照してくださ��。
+            本アプリは <a href="LICENSE">MIT License</a> のもとで公開されています。<br>
+            表示されるデータの正確性は保証されません。防災判断には必ず<a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_information" target="_blank" rel="noopener">気象庁</a>等の公式情報を参照してください。
           </p>
         </div>
         <div>
           <h4>SeismoWatch Lab</h4>
           <p>
-            世界の地震データを���本語で��索・取得できる静的Webアプリケーション。<br>
-            サ���バー不要��完全ブラウザ動作。GitHub Pagesで公開。
+            世界の地震データを日本語で検索・取得できる静的Webアプリケーション。<br>
+            サーバー不要・完全ブラウザ動作。GitHub Pagesで公開。
           </p>
         </div>
       </div>
@@ -474,7 +474,7 @@
   <!-- Chart.js (MIT) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 
-  <!-- ��プリモジュール -->
+  <!-- アプリモジュール -->
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
   <script src="js/map.js"></script>

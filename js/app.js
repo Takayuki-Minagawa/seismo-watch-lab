@@ -57,6 +57,7 @@
     Settings.initAutoRefresh(() => executeSearch());
     Settings.initSavedSearches();
     Settings.initShare();
+    Settings.onThemeChange(() => Charts.refreshTheme(currentData));
     DetailPanel.init();
 
     // 基本イベントリスナー
@@ -131,33 +132,29 @@
 
   // --- クイック検索 ---
   async function quickSearch(type) {
-    showLoading(true);
-    clearError();
+    // フォーム値を同期させてから検索
+    const presets = {
+      '24h-4.5':  { hours: 24,   minmag: '4', limit: '200' },
+      '7d-5.0':   { hours: 168,  minmag: '5', limit: '200' },
+      '30d-6.0':  { hours: 720,  minmag: '6', limit: '200' },
+      '365d-7.0': { hours: 8760, minmag: '7', limit: '500' },
+    };
+    const preset = presets[type];
+    if (!preset) return;
 
-    try {
-      let data;
-      switch (type) {
-        case '24h-4.5':
-          data = await EarthquakeAPI.recentSearch(24, 4.5);
-          break;
-        case '7d-5.0':
-          data = await EarthquakeAPI.recentSearch(168, 5.0);
-          break;
-        case '30d-6.0':
-          data = await EarthquakeAPI.recentSearch(720, 6.0);
-          break;
-        case '365d-7.0':
-          data = await EarthquakeAPI.recentSearch(8760, 7.0, 500);
-          break;
-        default:
-          return;
-      }
-      handleResults(data);
-    } catch (err) {
-      showError(err.message);
-    } finally {
-      showLoading(false);
-    }
+    // フォームに反映
+    const now = new Date();
+    const start = new Date(now.getTime() - preset.hours * 60 * 60 * 1000);
+    els.startdate.value = formatDateInput(start);
+    els.enddate.value = formatDateInput(now);
+    els.minmag.value = preset.minmag;
+    els.maxdepth.value = '';
+    els.region.value = 'global';
+    els.limit.value = preset.limit;
+    els.customBounds.style.display = 'none';
+
+    // フォーム経由で検索実行（自動更新・共有URL・保存条件と一致）
+    await executeSearch();
   }
 
   // --- 検索パラメータ組み立て ---
