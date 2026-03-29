@@ -1,15 +1,17 @@
 /**
  * app.js - SeismoWatch Lab メインアプリケーション
  * UI制御、検索実行、結果表示、ソート、ページネーション
+ * 拡張モジュール（統計・詳細・スペクトル・波形・設定）の統合
  */
 ;(() => {
   'use strict';
 
   // --- 状態管理 ---
-  let currentData = null;        // 現在の検索結果 (GeoJSON)
-  let sortedFeatures = [];       // ソート済みfeature配列
+  let currentData = null;
+  let sortedFeatures = [];
   let currentSort = { key: 'time', asc: false };
   let currentPage = 1;
+  let selectedFeature = null;
   const PAGE_SIZE = 50;
 
   // --- DOM要素 ---
@@ -36,11 +38,12 @@
     pageInfo: $('#page-info'),
     pagePrev: $('#page-prev'),
     pageNext: $('#page-next'),
+    chartsEmpty: $('#charts-empty'),
   };
 
   // --- 初期化 ---
   function init() {
-    // デフォルト日付（過去7日〜本日）
+    // デフォルト日付
     const today = new Date();
     const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
     els.startdate.value = formatDateInput(weekAgo);
@@ -49,7 +52,14 @@
     // 地図初期化
     EarthquakeMap.init('map');
 
-    // イベントリスナー
+    // 拡張モジュール初期化
+    Settings.initDarkMode();
+    Settings.initAutoRefresh(() => executeSearch());
+    Settings.initSavedSearches();
+    Settings.initShare();
+    DetailPanel.init();
+
+    // 基本イベントリスナー
     els.btnSearch.addEventListener('click', executeSearch);
     els.btnReset.addEventListener('click', resetForm);
     els.region.addEventListener('change', onRegionChange);
@@ -85,6 +95,20 @@
         if (e.key === 'Enter') executeSearch();
       });
     });
+
+    // 分析タブ切替
+    initTabs();
+
+    // 応答スペクトルツール
+    initSpectrumTool();
+
+    // 波形ビューア
+    initWaveformViewer();
+
+    // URL共有パラメータからの復元と自動検索
+    if (Settings.restoreFromURL()) {
+      setTimeout(executeSearch, 300);
+    }
   }
 
   // --- 検索実行 ---
@@ -142,7 +166,6 @@
 
     if (els.startdate.value) params.starttime = els.startdate.value;
     if (els.enddate.value) {
-      // 終了日は翌日の0時まで含める
       const end = new Date(els.enddate.value);
       end.setDate(end.getDate() + 1);
       params.endtime = formatDateInput(end);
@@ -151,7 +174,6 @@
     if (els.maxdepth.value) params.maxdepth = els.maxdepth.value;
     if (els.limit.value) params.limit = els.limit.value;
 
-    // 地域フィルタ
     const regionKey = els.region.value;
     if (regionKey === 'custom') {
       const minlat = $('#custom-minlat').value;
@@ -185,7 +207,6 @@
     const count = data.features ? data.features.length : 0;
     els.resultsCount.textContent = `検索結果: ${count}件`;
 
-    // ダウンロードボタン有効化
     const hasData = count > 0;
     els.btnCSV.disabled = !hasData;
     els.btnJSON.disabled = !hasData;
@@ -202,6 +223,8 @@
         </td></tr>`;
       els.pagination.style.display = 'none';
       EarthquakeMap.clearMarkers();
+      Charts.clearAll();
+      if (els.chartsEmpty) els.chartsEmpty.style.display = '';
       return;
     }
 
@@ -212,6 +235,10 @@
 
     // 地図表示
     EarthquakeMap.displayEarthquakes(data, onMarkerClick);
+
+    // 統計グラフ
+    if (els.chartsEmpty) els.chartsEmpty.style.display = 'none';
+    Charts.render(data);
 
     // 結果セクションまでスクロール
     $('#results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -225,7 +252,7 @@
     const pageFeatures = sortedFeatures.slice(start, end);
 
     let html = '';
-    pageFeatures.forEach((feature, idx) => {
+    pageFeatures.forEach((feature) => {
       const p = feature.properties;
       const c = feature.geometry.coordinates;
       const mag = p.mag;
@@ -249,15 +276,26 @@
 
     els.tbody.innerHTML = html;
 
-    // 行クリックで地図フォーカス
+    // 行クリック: 詳細パネル表示 + 地図フォーカス + 波形ビューア連携
     els.tbody.querySelectorAll('tr[data-lat]').forEach(tr => {
       tr.addEventListener('click', () => {
+        const idx = parseInt(tr.dataset.index, 10);
+        const feature = currentData.features[idx];
         const lat = parseFloat(tr.dataset.lat);
         const lon = parseFloat(tr.dataset.lon);
-        EarthquakeMap.focusOn(lat, lon);
+
         // ハイライト
         els.tbody.querySelectorAll('tr').forEach(r => r.classList.remove('highlighted'));
         tr.classList.add('highlighted');
+
+        // 地図フォーカス
+        EarthquakeMap.focusOn(lat, lon);
+
+        // 詳細パネル表示
+        DetailPanel.show(feature);
+
+        // 波形ビューア用に選択地震を記憶
+        selectFeatureForWaveform(feature);
       });
     });
 
@@ -310,7 +348,7 @@
       currentSort.asc = !currentSort.asc;
     } else {
       currentSort.key = key;
-      currentSort.asc = key === 'place'; // 地名は昇順デフォルト、他は降順
+      currentSort.asc = key === 'place';
     }
     currentPage = 1;
     sortFeatures();
@@ -343,14 +381,17 @@
     $('#results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // --- マーカークリック時 ---
+  // --- マーカークリック ---
   function onMarkerClick(index) {
-    // テーブル内の対応行をハイライト
     const row = els.tbody.querySelector(`tr[data-index="${index}"]`);
     if (row) {
       els.tbody.querySelectorAll('tr').forEach(r => r.classList.remove('highlighted'));
       row.classList.add('highlighted');
       row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (currentData && currentData.features[index]) {
+      DetailPanel.show(currentData.features[index]);
+      selectFeatureForWaveform(currentData.features[index]);
     }
   }
 
@@ -374,6 +415,168 @@
     $('#custom-maxlat').value = '';
     $('#custom-minlon').value = '';
     $('#custom-maxlon').value = '';
+  }
+
+  // ===== 分析タブ =====
+  function initTabs() {
+    $$('.tab-bar .tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.tab;
+
+        // ボタン切替
+        $$('.tab-bar .tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // コンテンツ切替
+        $$('#analysis-section .tab-content').forEach(tc => {
+          tc.classList.toggle('hidden', tc.id !== `tab-${target}`);
+        });
+      });
+    });
+  }
+
+  // ===== 応答スペクトルツール =====
+  function initSpectrumTool() {
+    let loadedData = null;
+
+    const btnCalc = $('#btn-calc-spectrum');
+    const fileInput = $('#spectrum-file');
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const format = $('#spectrum-format').value;
+          if (format === 'knet') {
+            loadedData = Spectrum.parseKNET(e.target.result);
+          } else {
+            loadedData = Spectrum.parseCSV(e.target.result);
+          }
+
+          // 波形表示
+          Spectrum.renderWaveform(loadedData.acc, loadedData.dt, 'chart-waveform-input');
+
+          // メタ情報表示
+          const info = $('#spectrum-info');
+          if (info) {
+            info.style.display = '';
+            const m = loadedData.meta;
+            info.innerHTML = `
+              <strong>読込完了:</strong>
+              データ点数: ${m._npts} /
+              サンプリング間隔: ${m._dt.toFixed(4)}秒 /
+              継続時間: ${m._duration.toFixed(1)}秒 /
+              最大加速度: ${m._maxAcc.toFixed(2)} gal
+              ${m['Station Code'] ? ' / 観測点: ' + m['Station Code'] : ''}
+              ${m['Dir.'] ? ' / 成分: ' + m['Dir.'] : ''}
+            `;
+          }
+
+          Settings.showToast(`${file.name} を読み込みました`);
+        } catch (err) {
+          Settings.showToast(`読込エラー: ${err.message}`);
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    btnCalc.addEventListener('click', () => {
+      if (!loadedData) {
+        Settings.showToast('先にデータファイルを読み込んでください');
+        return;
+      }
+
+      const dampingStr = $('#spectrum-damping').value;
+      const dampings = dampingStr.split(',').map(s => parseFloat(s.trim()) / 100).filter(d => !isNaN(d) && d > 0);
+      if (dampings.length === 0) {
+        Settings.showToast('減衰定数を正しく入力してください');
+        return;
+      }
+
+      Settings.showToast('応答スペクトルを計算中...');
+
+      // 重い計算をsetTimeoutで非同期に
+      setTimeout(() => {
+        try {
+          const result = Spectrum.computeSpectrum(loadedData.acc, loadedData.dt, {
+            hList: dampings,
+            periodMin: 0.02,
+            periodMax: 10.0,
+            periodCount: 100,
+          });
+
+          const type = $('#spectrum-type').value;
+          Spectrum.renderSpectrum(result, 'chart-spectrum', type);
+          Settings.showToast('応答スペクトルの計算が完了しました');
+        } catch (err) {
+          Settings.showToast(`計算エラー: ${err.message}`);
+        }
+      }, 50);
+    });
+  }
+
+  // ===== 波形ビューア =====
+  function initWaveformViewer() {
+    const btnSearch = $('#btn-search-stations');
+    const btnShow = $('#btn-show-waveform');
+
+    btnSearch.addEventListener('click', async () => {
+      if (!selectedFeature) {
+        Settings.showToast('先にテーブルから地震を選択してください');
+        return;
+      }
+
+      const coords = selectedFeature.geometry.coordinates;
+      const radius = parseFloat($('#waveform-radius').value);
+
+      btnSearch.disabled = true;
+      btnSearch.textContent = '検索中...';
+
+      try {
+        const stations = await WaveformViewer.searchStations(coords[1], coords[0], radius);
+        WaveformViewer.populateStationSelect(stations, 'waveform-station');
+
+        if (stations.length === 0) {
+          Settings.showToast('周辺に観測点が見つかりませんでした。検索半径を広げてください。');
+        } else {
+          Settings.showToast(`${stations.length}チャンネルが見つかりました`);
+        }
+      } catch (err) {
+        Settings.showToast(`観測点検索エラー: ${err.message}`);
+      } finally {
+        btnSearch.disabled = false;
+        btnSearch.textContent = '観測点を検索';
+      }
+    });
+
+    btnShow.addEventListener('click', () => {
+      const stationSel = $('#waveform-station');
+      if (!stationSel.value) {
+        Settings.showToast('観測点を選択してください');
+        return;
+      }
+      if (!selectedFeature) {
+        Settings.showToast('地震が選択されていません');
+        return;
+      }
+
+      const station = JSON.parse(stationSel.value);
+      const timeWindow = WaveformViewer.getTimeWindow(selectedFeature);
+      WaveformViewer.displayWaveform(station, timeWindow.starttime, timeWindow.endtime, 'waveform-display');
+    });
+  }
+
+  function selectFeatureForWaveform(feature) {
+    selectedFeature = feature;
+    const label = $('#waveform-eq-label');
+    if (label) {
+      const p = feature.properties;
+      const place = I18n.translatePlace(p.place);
+      label.value = `M${p.mag?.toFixed(1) || '?'} ${place}`;
+    }
   }
 
   // --- UI ヘルパー ---

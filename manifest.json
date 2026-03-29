@@ -1,0 +1,21 @@
+{
+  "name": "SeismoWatch Lab - 世界の地震データ検索",
+  "short_name": "SeismoWatch",
+  "description": "世界の地震データを日本語で検索・閲覧・ダウンロードできる静的Webアプリケーション",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f0f4f8",
+  "theme_color": "#1a365d",
+  "lang": "ja",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["utilities", "education"]
+}
