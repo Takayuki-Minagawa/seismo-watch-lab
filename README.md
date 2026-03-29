@@ -84,6 +84,7 @@ npx serve .
 
 - [気象庁](https://www.jma.go.jp/) - 地震情報、震度データベース、震央分布図
 - [防災科学技術研究所 (NIED)](https://www.bosai.go.jp/) - K-NET/KiK-net、Hi-net、J-SHIS
+- [IRIS / NSF SAGE](https://www.iris.edu/hq/) - Seismic Monitor、Web Services (FDSN)、Data Management Center
 - [EMSC (欧州地中海地震学センター)](https://www.emsc-csem.org/)
 
 各外部サイトのデータ利用については、それぞれの利用規約に従ってください。
