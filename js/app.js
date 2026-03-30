@@ -565,8 +565,8 @@
         };
         setWaveformViewControlsEnabled(true, currentWaveformView.end);
         updateWaveformViewInputs(currentWaveformView.start, currentWaveformView.end);
-        syncWaveformToSpectrum('IRIS 加速度波形');
-        Settings.showToast('IRIS 生波形を取得しました');
+        syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
+        Settings.showToast('IRIS 計器補正済み波形を取得しました');
       } catch (err) {
         currentWaveformData = null;
         currentWaveformView = { start: 0, end: null };
@@ -581,14 +581,14 @@
 
     btnApplyView.addEventListener('click', () => {
       if (!currentWaveformData) {
-        Settings.showToast('先に生波形を表示してください');
+        Settings.showToast('先に波形を表示してください');
         return;
       }
 
       try {
         currentWaveformView = getWaveformViewRangeFromInputs();
         WaveformViewer.renderWaveform(currentWaveformData, 'waveform-display', currentWaveformView);
-        syncWaveformToSpectrum('IRIS 加速度波形');
+        syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
       } catch (err) {
         Settings.showToast(err.message);
       }
@@ -602,16 +602,16 @@
       };
       updateWaveformViewInputs(currentWaveformView.start, currentWaveformView.end);
       WaveformViewer.renderWaveform(currentWaveformData, 'waveform-display', currentWaveformView);
-      syncWaveformToSpectrum('IRIS 加速度波形');
+      syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
     });
 
     btnSpectrum.addEventListener('click', () => {
       if (!currentWaveformData) {
-        Settings.showToast('先に生波形を表示してください');
+        Settings.showToast('先に波形を表示してください');
         return;
       }
 
-      syncWaveformToSpectrum('IRIS 加速度波形');
+      syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
       activateTab('spectrum');
       calculateSpectrumForLoadedData();
     });
@@ -652,7 +652,7 @@
 
   function calculateSpectrumForLoadedData() {
     if (!spectrumInputData) {
-      Settings.showToast('先に検索結果から地震を選び、波形ビューアで生波形を表示してください');
+      Settings.showToast('先に検索結果から地震を選び、波形ビューアで波形を表示してください');
       return;
     }
 
@@ -683,7 +683,7 @@
     }, 50);
   }
 
-  function syncWaveformToSpectrum(sourceLabel = 'IRIS 加速度波形') {
+  function syncWaveformToSpectrum(sourceLabel = 'IRIS 計器補正済み加速度波形') {
     if (!currentWaveformData) return null;
 
     const spectrumData = WaveformViewer.sliceWaveformData(
@@ -773,7 +773,7 @@
     const info = $('#spectrum-info');
     if (info) {
       info.style.display = '';
-      info.innerHTML = '検索結果から地震を選択し、波形ビューアで生波形を表示すると、ここに応答スペクトル入力情報が表示されます。';
+      info.innerHTML = '検索結果から地震を選択し、波形ビューアで計器補正済み加速度波形を表示すると、ここに応答スペクトル入力情報が表示されます。';
     }
   }
 

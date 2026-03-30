@@ -287,6 +287,7 @@ const WaveformViewer = (() => {
         plotUrl,
         filterPreset: options.filterPreset || 'none',
         requestedUnit: 'ACC',
+        responseCorrected: true,
       });
     })();
 
@@ -322,9 +323,18 @@ const WaveformViewer = (() => {
     const sampleRateMatch = header.match(/,\s*([\d.]+)\s+sps,/);
     const startTimeMatch = header.match(/,\s*([\d-]{4}-\d{2}-\d{2}T[\d:.]+),\s*TSPAIR/);
     const headerUnit = extractWaveformHeaderUnit(header);
-    const unitInfo = getAccelerationUnitInfo(headerUnit, context.requestedUnit || 'ACC');
+    const headerSampleType = extractWaveformHeaderSampleType(header);
+    const unitInfo = getAccelerationUnitInfo({
+      reportedUnit: headerUnit,
+      sampleType: headerSampleType,
+      requestedUnit: context.requestedUnit || 'ACC',
+      responseCorrected: Boolean(context.responseCorrected),
+    });
 
     if (!unitInfo) {
+      if (normalizeWaveformUnit(headerUnit) === 'COUNTS') {
+        throw new Error('IRIS が COUNTS の生波形を返しました。加速度として扱うには計器特性補正が必要です');
+      }
       throw new Error(`IRIS が加速度単位として解釈できない波形を返しました (${headerUnit || 'unknown'})`);
     }
 
@@ -375,9 +385,7 @@ const WaveformViewer = (() => {
         _filterLabel: getFilterLabel(context.filterPreset),
         _timeWindowStart: normalizeIRISTimeValue(context.starttime),
         _timeWindowEnd: normalizeIRISTimeValue(context.endtime),
-        _source: unitInfo.assumed
-          ? 'IRIS corrected acceleration (ACC request, metadata reported COUNTS)'
-          : 'IRIS corrected acceleration',
+        _source: buildWaveformSourceLabel(unitInfo),
         _inputUnit: unitInfo.inputLabel,
         _inputUnitReported: headerUnit || '',
         _displayUnit: unitInfo.displayUnit,
@@ -390,15 +398,38 @@ const WaveformViewer = (() => {
     return parts.length > 0 ? parts[parts.length - 1] : '';
   }
 
-  function getAccelerationUnitInfo(unit = '', requestedUnit = 'ACC') {
-    const normalized = unit.toUpperCase().replace(/\s+/g, '');
+  function extractWaveformHeaderSampleType(header = '') {
+    const parts = header.split(',').map(part => part.trim()).filter(Boolean);
+    return parts.length > 1 ? parts[parts.length - 2] : '';
+  }
+
+  function normalizeWaveformUnit(unit = '') {
+    return unit.toUpperCase().replace(/\s+/g, '');
+  }
+
+  function normalizeWaveformSampleType(sampleType = '') {
+    return sampleType.toUpperCase().replace(/\s+/g, '');
+  }
+
+  function isFloatWaveformSampleType(sampleType = '') {
+    return ['FLOAT', 'DOUBLE', 'REAL'].includes(sampleType);
+  }
+
+  function getAccelerationUnitInfo({
+    reportedUnit = '',
+    sampleType = '',
+    requestedUnit = 'ACC',
+    responseCorrected = false,
+  } = {}) {
+    const normalized = normalizeWaveformUnit(reportedUnit);
+    const normalizedSampleType = normalizeWaveformSampleType(sampleType);
 
     if (normalized === 'GAL') {
       return {
         toGalFactor: 1,
         displayUnit: 'gal',
         inputLabel: 'gal',
-        assumed: false,
+        inferredFromRequest: false,
       };
     }
 
@@ -418,21 +449,34 @@ const WaveformViewer = (() => {
       return {
         toGalFactor,
         displayUnit: 'gal',
-        inputLabel: unit,
-        assumed: false,
+        inputLabel: reportedUnit,
+        inferredFromRequest: false,
       };
     }
 
-    if (normalized === 'COUNTS' && requestedUnit === 'ACC') {
+    if (
+      normalized === 'COUNTS'
+      && responseCorrected
+      && requestedUnit === 'ACC'
+      && isFloatWaveformSampleType(normalizedSampleType)
+    ) {
       return {
         toGalFactor: 100,
         displayUnit: 'gal',
-        inputLabel: 'ACC request (IRIS metadata: COUNTS)',
-        assumed: true,
+        inputLabel: 'm/s^2 (ACC request; header reported COUNTS)',
+        inferredFromRequest: true,
       };
     }
 
     return null;
+  }
+
+  function buildWaveformSourceLabel(unitInfo) {
+    if (unitInfo.inferredFromRequest) {
+      return 'IRIS 計器補正済み加速度 (correct=true, units=ACC / ヘッダー単位: COUNTS)';
+    }
+
+    return 'IRIS 計器補正済み加速度';
   }
 
   function estimateDtFromDataLines(lines) {
@@ -547,7 +591,7 @@ const WaveformViewer = (() => {
         <span>フィルタ: ${escapeHtml(data.meta._filterLabel || 'なし')}</span>
       </div>
       <div class="waveform-info">
-        <span>${escapeHtml(data.meta._source)} / 解釈: ${escapeHtml(data.meta._inputUnit || '?')} / 単位: ${escapeHtml(data.meta._displayUnit || 'gal')}</span>
+        <span>${escapeHtml(data.meta._source)} / 返却ヘッダー: ${escapeHtml(data.meta._inputUnitReported || '?')} / 解析単位: ${escapeHtml(data.meta._inputUnit || '?')} / 表示単位: ${escapeHtml(data.meta._displayUnit || 'gal')}</span>
         <span>
           <a href="${data.meta._dataUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">ASCII2</a>
           <a href="${data.meta._plotUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">IRISプロット</a>
@@ -587,7 +631,7 @@ const WaveformViewer = (() => {
         plugins: {
           title: {
             display: true,
-            text: 'IRIS 生波形 (加速度)',
+            text: 'IRIS 計器補正済み加速度波形',
           },
           legend: {
             display: false,
@@ -644,7 +688,7 @@ const WaveformViewer = (() => {
     if (!container) return null;
 
     container.innerHTML = `
-      <div class="waveform-loading">IRIS から生波形データを取得中...</div>
+      <div class="waveform-loading">IRIS から計器補正済み加速度波形を取得中...</div>
     `;
 
     const data = await fetchWaveformData(station, starttime, endtime, options);
@@ -665,7 +709,7 @@ const WaveformViewer = (() => {
 
     container.innerHTML = `
       <div class="waveform-placeholder">
-        地震を選択し、観測点を検索してから生波形を表示してください
+        地震を選択し、観測点を検索してから波形を表示してください
       </div>
     `;
   }

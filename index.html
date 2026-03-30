@@ -250,7 +250,7 @@
       <!-- 応答スペクトルタブ -->
       <div class="tab-content hidden" id="tab-spectrum">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          検索結果から地震を選択し、波形ビューアで取得した IRIS 加速度波形から応答スペクトルを計算します。
+          検索結果から地震を選択し、波形ビューアで取得した IRIS 計器補正済み加速度波形から応答スペクトルを計算します。
           この画面でのファイル読込は行いません。
         </p>
         <div class="spectrum-controls">
@@ -281,7 +281,8 @@
       <!-- 波形ビューアタブ -->
       <div class="tab-content hidden" id="tab-waveform">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          IRIS (NSF SAGE) のデータサービスから計器補正済み加速度の生波形を取得し、距離順の観測点一覧、フィルタ、表示範囲調整、応答スペクトル連携を行います。
+          IRIS (NSF SAGE) のデータサービスから計器補正済み加速度波形を取得し、距離順の観測点一覧、フィルタ、表示範囲調整、応答スペクトル連携を行います。
+          既定の生ダウンロード値は COUNTS のため、このビューアでは <code>correct=true&amp;units=ACC</code> を指定して物理単位へ変換した波形を利用します。
           結果テーブルの行をクリックして地震を選択してください。
         </p>
         <div class="waveform-controls">
@@ -346,7 +347,7 @@
         <div class="station-summary hidden" id="waveform-station-summary"></div>
         <div class="waveform-display" id="waveform-display">
           <div class="waveform-placeholder">
-            地震を選択し、観測点を検索してから生波形を表示してください
+            地震を選択し、観測点を検索してから波形を表示してください
           </div>
         </div>
       </div>
