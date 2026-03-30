@@ -467,33 +467,7 @@
   // ===== 応答スペクトルツール =====
   function initSpectrumTool() {
     const btnCalc = $('#btn-calc-spectrum');
-    const fileInput = $('#spectrum-file');
-
-    fileInput.addEventListener('change', () => {
-      const file = fileInput.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const format = $('#spectrum-format').value;
-          let loadedData = null;
-          if (format === 'knet') {
-            loadedData = Spectrum.parseKNET(e.target.result);
-          } else {
-            loadedData = Spectrum.parseCSV(e.target.result);
-          }
-
-          setSpectrumInput(loadedData, `${file.name} を読込`);
-
-          Settings.showToast(`${file.name} を読み込みました`);
-        } catch (err) {
-          Settings.showToast(`読込エラー: ${err.message}`);
-        }
-      };
-      reader.readAsText(file);
-    });
-
+    resetSpectrumState();
     btnCalc.addEventListener('click', calculateSpectrumForLoadedData);
   }
 
@@ -508,6 +482,8 @@
     const filterSel = $('#waveform-filter');
 
     resetWaveformViewerState();
+
+    stationSel.addEventListener('change', updateSelectedWaveformStationSummary);
 
     btnSearch.addEventListener('click', async () => {
       if (!selectedFeature) {
@@ -536,6 +512,12 @@
           }
         );
         WaveformViewer.populateStationSelect(result.stations, 'waveform-station');
+        renderWaveformStationSummary(result.stations, result.candidateCount, result.availableCount);
+
+        if (result.stations.length > 0 && stationSel.options.length > 1) {
+          stationSel.selectedIndex = 1;
+          updateSelectedWaveformStationSummary();
+        }
 
         if (result.candidateCount === 0) {
           Settings.showToast('周辺に観測点が見つかりませんでした。検索半径を広げてください。');
@@ -639,6 +621,9 @@
     spectrumInputData = data;
     Spectrum.renderWaveform(data.acc, data.dt, 'chart-waveform-input');
 
+    const btnCalc = $('#btn-calc-spectrum');
+    if (btnCalc) btnCalc.disabled = false;
+
     const info = $('#spectrum-info');
     if (info) {
       info.style.display = '';
@@ -667,7 +652,7 @@
 
   function calculateSpectrumForLoadedData() {
     if (!spectrumInputData) {
-      Settings.showToast('先に加速度データを読み込むか、波形を表示してください');
+      Settings.showToast('先に検索結果から地震を選び、波形ビューアで生波形を表示してください');
       return;
     }
 
@@ -759,15 +744,102 @@
   function resetWaveformViewerState() {
     currentWaveformData = null;
     currentWaveformView = { start: 0, end: null };
+    WaveformViewer.clearCache();
 
     const stationSel = $('#waveform-station');
     if (stationSel) {
       stationSel.innerHTML = '<option value="">-- 先に観測点を検索 --</option>';
     }
 
+    const stationSummary = $('#waveform-station-summary');
+    if (stationSummary) {
+      stationSummary.innerHTML = '';
+      stationSummary.classList.add('hidden');
+    }
+
     updateWaveformViewInputs(0, 0);
     setWaveformViewControlsEnabled(false);
     WaveformViewer.resetDisplay('waveform-display');
+    resetSpectrumState();
+  }
+
+  function resetSpectrumState() {
+    spectrumInputData = null;
+    Spectrum.clearCharts();
+
+    const btnCalc = $('#btn-calc-spectrum');
+    if (btnCalc) btnCalc.disabled = true;
+
+    const info = $('#spectrum-info');
+    if (info) {
+      info.style.display = '';
+      info.innerHTML = '検索結果から地震を選択し、波形ビューアで生波形を表示すると、ここに応答スペクトル入力情報が表示されます。';
+    }
+  }
+
+  function renderWaveformStationSummary(stations, candidateCount = 0, availableCount = 0) {
+    const container = $('#waveform-station-summary');
+    if (!container) return;
+
+    if (!stations.length) {
+      container.innerHTML = '';
+      container.classList.add('hidden');
+      return;
+    }
+
+    const rows = stations.map((station, index) => `
+      <tr data-station-key="${escapeHtml(station.stationKey)}">
+        <td>${index + 1}</td>
+        <td class="station-summary-code">${escapeHtml(station.stationKey)}</td>
+        <td>${station.distanceKm.toFixed(1)} km</td>
+        <td>${station.previewMaxAcc.toFixed(2)} gal</td>
+      </tr>
+    `).join('');
+
+    container.innerHTML = `
+      <div class="station-summary-header">
+        <strong>観測点候補</strong>
+        <span>${availableCount} / ${candidateCount} チャンネルが波形取得可能</span>
+      </div>
+      <div class="station-summary-table-wrap">
+        <table class="station-summary-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>観測点</th>
+              <th>距離</th>
+              <th>最大加速度</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    container.classList.remove('hidden');
+
+    container.querySelectorAll('tbody tr[data-station-key]').forEach(row => {
+      row.addEventListener('click', () => {
+        const stationKey = row.dataset.stationKey;
+        const stationSel = $('#waveform-station');
+        if (!stationSel) return;
+
+        const option = Array.from(stationSel.options).find(opt => opt.dataset.stationKey === stationKey);
+        if (!option) return;
+
+        stationSel.value = option.value;
+        updateSelectedWaveformStationSummary();
+      });
+    });
+
+    updateSelectedWaveformStationSummary();
+  }
+
+  function updateSelectedWaveformStationSummary() {
+    const stationSel = $('#waveform-station');
+    const stationKey = stationSel?.selectedOptions?.[0]?.dataset?.stationKey || '';
+    $$('#waveform-station-summary tbody tr[data-station-key]').forEach(row => {
+      row.classList.toggle('active', row.dataset.stationKey === stationKey);
+    });
   }
 
   function selectFeatureForWaveform(feature) {

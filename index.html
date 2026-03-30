@@ -250,20 +250,10 @@
       <!-- 応答スペクトルタブ -->
       <div class="tab-content hidden" id="tab-spectrum">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          K-NET形式またはCSV形式の加速度データファイル、または波形ビューアで取得したIRIS加速度波形から応答スペクトルを計算します。
+          検索結果から地震を選択し、波形ビューアで取得した IRIS 加速度波形から応答スペクトルを計算します。
+          この画面でのファイル読込は行いません。
         </p>
         <div class="spectrum-controls">
-          <div class="form-group">
-            <label for="spectrum-file">加速度データファイル</label>
-            <input type="file" id="spectrum-file" accept=".csv,.txt,.ns,.ew,.ud,.NS,.EW,.UD,.NS2,.EW2,.UD2">
-          </div>
-          <div class="form-group">
-            <label for="spectrum-format">形式</label>
-            <select id="spectrum-format">
-              <option value="knet">K-NET</option>
-              <option value="csv">CSV (時間,加速度)</option>
-            </select>
-          </div>
           <div class="form-group">
             <label for="spectrum-damping">減衰定数 (%)</label>
             <input type="text" id="spectrum-damping" value="5" style="width:100px;">
@@ -278,7 +268,7 @@
           </div>
           <div class="form-group">
             <label>&nbsp;</label>
-            <button class="btn btn-primary btn-sm" id="btn-calc-spectrum">計算</button>
+            <button class="btn btn-primary btn-sm" id="btn-calc-spectrum" disabled>計算</button>
           </div>
         </div>
         <div class="spectrum-chart-area">
@@ -291,7 +281,7 @@
       <!-- 波形ビューアタブ -->
       <div class="tab-content hidden" id="tab-waveform">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          IRIS (NSF SAGE) のデータサービスから計器補正済み加速度の生波形を取得し、フィルタ・表示範囲調整・応答スペクトル連携を行います。
+          IRIS (NSF SAGE) のデータサービスから計器補正済み加速度の生波形を取得し、距離順の観測点一覧、フィルタ、表示範囲調整、応答スペクトル連携を行います。
           結果テーブルの行をクリックして地震を選択してください。
         </p>
         <div class="waveform-controls">
@@ -353,6 +343,7 @@
             <button class="btn btn-sm btn-secondary" id="btn-waveform-spectrum" disabled>応答スペクトル作成</button>
           </div>
         </div>
+        <div class="station-summary hidden" id="waveform-station-summary"></div>
         <div class="waveform-display" id="waveform-display">
           <div class="waveform-placeholder">
             地震を選択し、観測点を検索してから生波形を表示してください

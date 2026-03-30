@@ -6,10 +6,11 @@ const WaveformViewer = (() => {
   const STATION_URL = 'https://service.iris.edu/fdsnws/station/1/query';
   const TIMESERIES_URL = 'https://service.iris.edu/irisws/timeseries/1/query';
   const MAX_PLOT_POINTS = 4000;
-  const AVAILABILITY_CHECK_CONCURRENCY = 6;
+  const STATION_PREVIEW_CONCURRENCY = 4;
 
   let stationData = [];
   let waveformChart = null;
+  const waveformDataCache = new Map();
 
   /**
    * 震央付近の観測点を検索
@@ -17,7 +18,7 @@ const WaveformViewer = (() => {
    * @param {number} lon - 経度
    * @param {number} maxRadius - 検索半径(度)
    * @param {number|string|Date} eventTime - 地震発生時刻
-   * @returns {Promise<Array>} 観測点リスト
+   * @returns {Promise<Object>} 観測点リストと集計
    */
   async function searchStations(lat, lon, maxRadius = 5, eventTime = null, options = {}) {
     const params = new URLSearchParams({
@@ -45,7 +46,7 @@ const WaveformViewer = (() => {
     }
 
     const text = await resp.text();
-    const stations = parseStationText(text);
+    const stations = sortStationsByDistance(parseStationText(text), lat, lon);
 
     if (!options.requireWaveform || !options.starttime || !options.endtime) {
       stationData = stations;
@@ -56,7 +57,7 @@ const WaveformViewer = (() => {
       };
     }
 
-    const availableStations = await filterStationsByWaveformAvailability(
+    const availableStations = await buildStationPreviews(
       stations,
       options.starttime,
       options.endtime,
@@ -95,11 +96,25 @@ const WaveformViewer = (() => {
         channel: parts[3].trim(),
         lat: parseFloat(parts[4]),
         lon: parseFloat(parts[5]),
-        name: parts.length > 6 ? parts[6]?.trim() : '',
+        elevation: parts.length > 6 ? parseFloat(parts[6]) : null,
+        sensor: parts.length > 10 ? parts[10]?.trim() : '',
+        stationKey: `${parts[0].trim()}.${parts[1].trim()}.${parts[2].trim() || '--'}.${parts[3].trim()}`,
       });
     }
 
     return stations;
+  }
+
+  function sortStationsByDistance(stations, originLat, originLon) {
+    return stations
+      .map(station => ({
+        ...station,
+        distanceKm: calculateDistanceKm(originLat, originLon, station.lat, station.lon),
+      }))
+      .sort((a, b) => {
+        if (a.distanceKm !== b.distanceKm) return a.distanceKm - b.distanceKm;
+        return a.stationKey.localeCompare(b.stationKey);
+      });
   }
 
   /**
@@ -123,12 +138,14 @@ const WaveformViewer = (() => {
     uniqueStations.forEach((channels, key) => {
       const first = channels[0];
       const group = document.createElement('optgroup');
-      group.label = `${key} (${first.name || '?'})`;
+      const distanceText = Number.isFinite(first.distanceKm) ? `${first.distanceKm.toFixed(1)} km` : '? km';
+      group.label = `${key} / ${distanceText}`;
 
       channels.forEach(channel => {
         const opt = document.createElement('option');
         opt.value = JSON.stringify(channel);
-        opt.textContent = `${channel.channel} [${channel.location || '--'}]`;
+        opt.dataset.stationKey = channel.stationKey;
+        opt.textContent = `${channel.channel} [${channel.location || '--'}] / ${formatDistance(channel.distanceKm)} / ${formatMaxAcc(channel.previewMaxAcc)}`;
         group.appendChild(opt);
       });
 
@@ -201,29 +218,10 @@ const WaveformViewer = (() => {
   }
 
   async function fetchWaveformData(station, starttime, endtime, options = {}) {
-    const dataUrl = getWaveformDataURL(station, starttime, endtime, options);
-    const plotUrl = getWaveformImageURL(station, starttime, endtime, options);
-    const resp = await fetch(dataUrl);
-
-    if (!resp.ok) {
-      if (resp.status === 404) {
-        throw new Error('この観測点・時間帯の波形データは見つかりませんでした');
-      }
-      throw new Error(`波形取得エラー (HTTP ${resp.status})`);
-    }
-
-    const text = await resp.text();
-    return parseWaveformText(text, {
-      station,
-      starttime,
-      endtime,
-      dataUrl,
-      plotUrl,
-      filterPreset: options.filterPreset || 'none',
-    });
+    return getOrFetchWaveformData(station, starttime, endtime, options);
   }
 
-  async function filterStationsByWaveformAvailability(stations, starttime, endtime, options = {}) {
+  async function buildStationPreviews(stations, starttime, endtime, options = {}) {
     if (!stations.length) return [];
 
     const available = [];
@@ -233,12 +231,12 @@ const WaveformViewer = (() => {
       while (currentIndex < stations.length) {
         const index = currentIndex++;
         const station = stations[index];
-        const ok = await canFetchWaveform(station, starttime, endtime, options);
-        if (ok) available.push({ index, station });
+        const preview = await fetchStationPreview(station, starttime, endtime, options);
+        if (preview) available.push({ index, station: preview });
       }
     }
 
-    const workerCount = Math.min(AVAILABILITY_CHECK_CONCURRENCY, stations.length);
+    const workerCount = Math.min(STATION_PREVIEW_CONCURRENCY, stations.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     return available
@@ -246,19 +244,68 @@ const WaveformViewer = (() => {
       .map(entry => entry.station);
   }
 
-  async function canFetchWaveform(station, starttime, endtime, options = {}) {
-    const url = getWaveformImageURL(station, starttime, endtime, {
-      ...options,
-      width: 10,
-      height: 10,
-    });
-
+  async function fetchStationPreview(station, starttime, endtime, options = {}) {
     try {
-      const resp = await fetch(url, { cache: 'no-store' });
-      return resp.ok;
+      const data = await getOrFetchWaveformData(station, starttime, endtime, options);
+      return {
+        ...station,
+        previewMaxAcc: data.meta._maxAcc,
+        previewDuration: data.meta._duration,
+        previewNpts: data.meta._npts,
+        previewSampleRate: data.meta._sampleRate,
+      };
     } catch (_) {
-      return false;
+      return null;
     }
+  }
+
+  async function getOrFetchWaveformData(station, starttime, endtime, options = {}) {
+    const cacheKey = getWaveformCacheKey(station, starttime, endtime, options);
+    if (waveformDataCache.has(cacheKey)) {
+      return waveformDataCache.get(cacheKey);
+    }
+
+    const task = (async () => {
+      const dataUrl = getWaveformDataURL(station, starttime, endtime, options);
+      const plotUrl = getWaveformImageURL(station, starttime, endtime, options);
+      const resp = await fetch(dataUrl, { cache: 'no-store' });
+
+      if (!resp.ok) {
+        if (resp.status === 404) {
+          throw new Error('この観測点・時間帯の波形データは見つかりませんでした');
+        }
+        throw new Error(`波形取得エラー (HTTP ${resp.status})`);
+      }
+
+      const text = await resp.text();
+      return parseWaveformText(text, {
+        station,
+        starttime,
+        endtime,
+        dataUrl,
+        plotUrl,
+        filterPreset: options.filterPreset || 'none',
+      });
+    })();
+
+    waveformDataCache.set(cacheKey, task);
+    try {
+      const data = await task;
+      waveformDataCache.set(cacheKey, Promise.resolve(data));
+      return data;
+    } catch (err) {
+      waveformDataCache.delete(cacheKey);
+      throw err;
+    }
+  }
+
+  function getWaveformCacheKey(station, starttime, endtime, options = {}) {
+    return [
+      station.stationKey || `${station.network}.${station.station}.${station.location || '--'}.${station.channel}`,
+      normalizeIRISTimeValue(starttime),
+      normalizeIRISTimeValue(endtime),
+      options.filterPreset || 'none',
+    ].join('|');
   }
 
   function parseWaveformText(text, context = {}) {
@@ -560,6 +607,29 @@ const WaveformViewer = (() => {
     `;
   }
 
+  function clearCache() {
+    waveformDataCache.clear();
+  }
+
+  function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+    const toRad = deg => deg * Math.PI / 180;
+    const earthRadiusKm = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2
+      + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return earthRadiusKm * c;
+  }
+
+  function formatDistance(distanceKm) {
+    return Number.isFinite(distanceKm) ? `${distanceKm.toFixed(1)} km` : '-';
+  }
+
+  function formatMaxAcc(maxAcc) {
+    return Number.isFinite(maxAcc) ? `max ${maxAcc.toFixed(2)} gal` : 'max -';
+  }
+
   function escapeHtml(str) {
     if (!str) return '';
     const div = document.createElement('div');
@@ -575,6 +645,7 @@ const WaveformViewer = (() => {
     fetchWaveformData,
     renderWaveform,
     resetDisplay,
+    clearCache,
     sliceWaveformData,
     getWaveformDataURL,
     getWaveformImageURL,
