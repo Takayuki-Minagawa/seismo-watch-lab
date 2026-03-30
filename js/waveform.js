@@ -11,6 +11,7 @@ const WaveformViewer = (() => {
   let stationData = [];
   let waveformChart = null;
   const waveformDataCache = new Map();
+  const stationPublicInfoCache = new Map();
 
   /**
    * 震央付近の観測点を検索
@@ -76,33 +77,191 @@ const WaveformViewer = (() => {
    * FDSN text形式の観測点データをパース
    */
   function parseStationText(text) {
-    const lines = text.trim().split('\n');
+    const rows = parseFdsnTextTable(text).rows;
     const stations = [];
     const seen = new Set();
 
-    for (const line of lines) {
-      if (line.startsWith('#')) continue;
-      const parts = line.split('|');
-      if (parts.length < 6) continue;
+    for (const row of rows) {
+      const network = getTableRowValue(row, ['Network']);
+      const station = getTableRowValue(row, ['Station']);
+      const location = getTableRowValue(row, ['Location']);
+      const channel = getTableRowValue(row, ['Channel']);
+      const lat = parseMaybeFloat(getTableRowValue(row, ['Latitude']));
+      const lon = parseMaybeFloat(getTableRowValue(row, ['Longitude']));
+      if (!network || !station || !channel || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
 
-      const key = `${parts[0]}.${parts[1]}.${parts[2]}.${parts[3]}`;
+      const key = `${network}.${station}.${location}.${channel}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
       stations.push({
-        network: parts[0].trim(),
-        station: parts[1].trim(),
-        location: parts[2].trim(),
-        channel: parts[3].trim(),
-        lat: parseFloat(parts[4]),
-        lon: parseFloat(parts[5]),
-        elevation: parts.length > 6 ? parseFloat(parts[6]) : null,
-        sensor: parts.length > 10 ? parts[10]?.trim() : '',
-        stationKey: `${parts[0].trim()}.${parts[1].trim()}.${parts[2].trim() || '--'}.${parts[3].trim()}`,
+        network,
+        station,
+        location,
+        channel,
+        lat,
+        lon,
+        elevation: parseMaybeFloat(getTableRowValue(row, ['Elevation'])),
+        depth: parseMaybeFloat(getTableRowValue(row, ['Depth'])),
+        azimuth: parseMaybeFloat(getTableRowValue(row, ['Azimuth'])),
+        dip: parseMaybeFloat(getTableRowValue(row, ['Dip'])),
+        sensor: getTableRowValue(row, ['SensorDescription', 'Instrument']),
+        scale: getTableRowValue(row, ['Scale']),
+        scaleFreq: getTableRowValue(row, ['ScaleFreq']),
+        scaleUnits: getTableRowValue(row, ['ScaleUnits']),
+        sampleRate: getTableRowValue(row, ['SampleRate']),
+        startTime: getTableRowValue(row, ['StartTime']),
+        endTime: getTableRowValue(row, ['EndTime']),
+        stationKey: `${network}.${station}.${location || '--'}.${channel}`,
+        _rawChannelMetadata: row,
       });
     }
 
     return stations;
+  }
+
+  function parseFdsnTextTable(text) {
+    const lines = text.trim().split('\n').map(line => line.trim()).filter(Boolean);
+    if (!lines.length) return { headers: [], rows: [] };
+
+    const headerLine = lines.find(line => line.startsWith('#'));
+    if (!headerLine) return { headers: [], rows: [] };
+
+    const headers = headerLine
+      .replace(/^#/, '')
+      .split('|')
+      .map(trimStationField)
+      .filter(Boolean);
+
+    const rows = lines
+      .filter(line => !line.startsWith('#'))
+      .map(line => {
+        const parts = line.split('|');
+        const row = {};
+        headers.forEach((header, index) => {
+          row[header] = trimStationField(parts[index]);
+        });
+        return row;
+      });
+
+    return { headers, rows };
+  }
+
+  function trimStationField(value = '') {
+    return value.trim();
+  }
+
+  function getTableRowValue(row = {}, keys = []) {
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(row, key)) {
+        return trimStationField(row[key] || '');
+      }
+    }
+    return '';
+  }
+
+  function parseMaybeFloat(value) {
+    const num = parseFloat(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function buildStationQueryURL(station, level = 'channel', format = 'text', eventTime = null) {
+    const params = new URLSearchParams({
+      net: station.network,
+      sta: station.station,
+      level,
+      format,
+      nodata: '404',
+    });
+
+    if (level !== 'station') {
+      params.set('loc', station.location || '--');
+      params.set('cha', station.channel);
+    }
+
+    if (eventTime) {
+      const irisTime = formatIRISTime(eventTime);
+      params.set('startbefore', irisTime);
+      params.set('endafter', irisTime);
+    }
+
+    return `${STATION_URL}?${params.toString()}`;
+  }
+
+  function getStationPublicInfoCacheKey(station, eventTime = null) {
+    return [
+      station.stationKey || `${station.network}.${station.station}.${station.location || '--'}.${station.channel}`,
+      eventTime ? normalizeIRISTimeValue(eventTime) : '',
+    ].join('|');
+  }
+
+  async function fetchStationPublicInfo(station, eventTime = null) {
+    const cacheKey = getStationPublicInfoCacheKey(station, eventTime);
+    if (stationPublicInfoCache.has(cacheKey)) {
+      return stationPublicInfoCache.get(cacheKey);
+    }
+
+    const task = (async () => {
+      const stationTextUrl = buildStationQueryURL(station, 'station', 'text', eventTime);
+      const channelTextUrl = buildStationQueryURL(station, 'channel', 'text', eventTime);
+      const responseXmlUrl = buildStationQueryURL(station, 'response', 'xml', eventTime);
+      const siteRow = await fetchStationSiteRow(stationTextUrl);
+
+      return {
+        stationKey: station.stationKey,
+        siteRow,
+        channelRow: station._rawChannelMetadata || buildFallbackChannelRow(station),
+        urls: {
+          stationTextUrl,
+          channelTextUrl,
+          responseXmlUrl,
+        },
+      };
+    })();
+
+    stationPublicInfoCache.set(cacheKey, task);
+    try {
+      const info = await task;
+      stationPublicInfoCache.set(cacheKey, Promise.resolve(info));
+      return info;
+    } catch (err) {
+      stationPublicInfoCache.delete(cacheKey);
+      throw err;
+    }
+  }
+
+  async function fetchStationSiteRow(url) {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) {
+      if (resp.status === 404) return {};
+      throw new Error(`観測点メタデータ取得エラー (HTTP ${resp.status})`);
+    }
+
+    const text = await resp.text();
+    const rows = parseFdsnTextTable(text).rows;
+    return rows[0] || {};
+  }
+
+  function buildFallbackChannelRow(station) {
+    return {
+      Network: station.network || '',
+      Station: station.station || '',
+      Location: station.location || '',
+      Channel: station.channel || '',
+      Latitude: Number.isFinite(station.lat) ? String(station.lat) : '',
+      Longitude: Number.isFinite(station.lon) ? String(station.lon) : '',
+      Elevation: Number.isFinite(station.elevation) ? String(station.elevation) : '',
+      Depth: Number.isFinite(station.depth) ? String(station.depth) : '',
+      Azimuth: Number.isFinite(station.azimuth) ? String(station.azimuth) : '',
+      Dip: Number.isFinite(station.dip) ? String(station.dip) : '',
+      SensorDescription: station.sensor || '',
+      Scale: station.scale || '',
+      ScaleFreq: station.scaleFreq || '',
+      ScaleUnits: station.scaleUnits || '',
+      SampleRate: station.sampleRate || '',
+      StartTime: station.startTime || '',
+      EndTime: station.endTime || '',
+    };
   }
 
   function sortStationsByDistance(stations, originLat, originLon) {
@@ -716,6 +875,7 @@ const WaveformViewer = (() => {
 
   function clearCache() {
     waveformDataCache.clear();
+    stationPublicInfoCache.clear();
   }
 
   function calculateDistanceKm(lat1, lon1, lat2, lon2) {
@@ -750,6 +910,7 @@ const WaveformViewer = (() => {
     getTimeWindow,
     displayWaveform,
     fetchWaveformData,
+    fetchStationPublicInfo,
     renderWaveform,
     resetDisplay,
     clearCache,

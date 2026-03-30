@@ -17,6 +17,7 @@
   let spectrumInputData = null;
   let currentWaveformData = null;
   let currentWaveformView = { start: 0, end: null };
+  let waveformStationInfoRequestSeq = 0;
   const PAGE_SIZE = 50;
 
   // --- DOM要素 ---
@@ -483,7 +484,7 @@
 
     resetWaveformViewerState();
 
-    stationSel.addEventListener('change', updateSelectedWaveformStationSummary);
+    stationSel.addEventListener('change', handleWaveformStationSelectionChange);
 
     btnSearch.addEventListener('click', async () => {
       if (!selectedFeature) {
@@ -516,7 +517,7 @@
 
         if (result.stations.length > 0 && stationSel.options.length > 1) {
           stationSel.selectedIndex = 1;
-          updateSelectedWaveformStationSummary();
+          handleWaveformStationSelectionChange();
         }
 
         if (result.candidateCount === 0) {
@@ -744,6 +745,7 @@
   function resetWaveformViewerState() {
     currentWaveformData = null;
     currentWaveformView = { start: 0, end: null };
+    waveformStationInfoRequestSeq += 1;
     WaveformViewer.clearCache();
 
     const stationSel = $('#waveform-station');
@@ -756,6 +758,8 @@
       stationSummary.innerHTML = '';
       stationSummary.classList.add('hidden');
     }
+
+    resetWaveformStationDetail();
 
     updateWaveformViewInputs(0, 0);
     setWaveformViewControlsEnabled(false);
@@ -827,7 +831,7 @@
         if (!option) return;
 
         stationSel.value = option.value;
-        updateSelectedWaveformStationSummary();
+        handleWaveformStationSelectionChange();
       });
     });
 
@@ -840,6 +844,164 @@
     $$('#waveform-station-summary tbody tr[data-station-key]').forEach(row => {
       row.classList.toggle('active', row.dataset.stationKey === stationKey);
     });
+  }
+
+  async function handleWaveformStationSelectionChange() {
+    updateSelectedWaveformStationSummary();
+
+    const station = getSelectedWaveformStation();
+    if (!station || !selectedFeature) {
+      resetWaveformStationDetail();
+      return;
+    }
+
+    const requestSeq = ++waveformStationInfoRequestSeq;
+    renderWaveformStationDetailLoading(station);
+
+    try {
+      const info = await WaveformViewer.fetchStationPublicInfo(station, selectedFeature.properties.time);
+      if (requestSeq !== waveformStationInfoRequestSeq) return;
+
+      const activeStation = getSelectedWaveformStation();
+      if (!activeStation || activeStation.stationKey !== station.stationKey) return;
+
+      renderWaveformStationDetail(info);
+    } catch (err) {
+      if (requestSeq !== waveformStationInfoRequestSeq) return;
+      renderWaveformStationDetailError(station, err.message);
+    }
+  }
+
+  function getSelectedWaveformStation() {
+    const stationSel = $('#waveform-station');
+    if (!stationSel?.value) return null;
+
+    try {
+      return JSON.parse(stationSel.value);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function resetWaveformStationDetail() {
+    const container = $('#waveform-station-detail');
+    if (!container) return;
+    container.innerHTML = '';
+    container.classList.add('hidden');
+  }
+
+  function renderWaveformStationDetailLoading(station) {
+    const container = $('#waveform-station-detail');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="station-detail-header">
+        <div class="station-detail-title">
+          <strong>観測点公開メタデータ</strong>
+          <span>${escapeHtml(station.stationKey || `${station.network}.${station.station}`)}</span>
+        </div>
+        <span class="station-detail-status">EarthScope から取得中...</span>
+      </div>
+    `;
+    container.classList.remove('hidden');
+  }
+
+  function renderWaveformStationDetailError(station, message) {
+    const container = $('#waveform-station-detail');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="station-detail-header">
+        <div class="station-detail-title">
+          <strong>観測点公開メタデータ</strong>
+          <span>${escapeHtml(station.stationKey || `${station.network}.${station.station}`)}</span>
+        </div>
+        <span class="station-detail-status">取得失敗</span>
+      </div>
+      <div class="waveform-error">${escapeHtml(message || '観測点メタデータを取得できませんでした')}</div>
+    `;
+    container.classList.remove('hidden');
+  }
+
+  function renderWaveformStationDetail(info) {
+    const container = $('#waveform-station-detail');
+    if (!container) return;
+
+    const siteRow = info.siteRow || {};
+    const channelRow = info.channelRow || {};
+    const siteName = siteRow.SiteName || channelRow.SiteName || '';
+    const titleCode = info.stationKey || `${channelRow.Network || ''}.${channelRow.Station || ''}.${channelRow.Location || '--'}.${channelRow.Channel || ''}`;
+
+    const siteItems = [
+      ['Network', siteRow.Network || channelRow.Network],
+      ['Station', siteRow.Station || channelRow.Station],
+      ['SiteName', siteName],
+      ['Latitude', siteRow.Latitude],
+      ['Longitude', siteRow.Longitude],
+      ['Elevation', siteRow.Elevation],
+      ['StartTime', siteRow.StartTime],
+      ['EndTime', siteRow.EndTime],
+    ];
+
+    const channelItems = [
+      ['Location', channelRow.Location],
+      ['Channel', channelRow.Channel],
+      ['Latitude', channelRow.Latitude],
+      ['Longitude', channelRow.Longitude],
+      ['Elevation', channelRow.Elevation],
+      ['Depth', channelRow.Depth],
+      ['Azimuth', channelRow.Azimuth],
+      ['Dip', channelRow.Dip],
+      ['SensorDescription', channelRow.SensorDescription || channelRow.Instrument],
+      ['Scale', channelRow.Scale],
+      ['ScaleFreq', channelRow.ScaleFreq],
+      ['ScaleUnits', channelRow.ScaleUnits],
+      ['SampleRate', channelRow.SampleRate],
+      ['StartTime', channelRow.StartTime],
+      ['EndTime', channelRow.EndTime],
+    ];
+
+    container.innerHTML = `
+      <div class="station-detail-header">
+        <div class="station-detail-title">
+          <strong>観測点公開メタデータ</strong>
+          <span>${escapeHtml(titleCode)}</span>
+        </div>
+        <span class="station-detail-status">${escapeHtml(siteName || 'EarthScope FDSN Station metadata')}</span>
+      </div>
+      <div class="station-detail-grid">
+        ${buildWaveformStationDetailSection('Site / Station', siteItems)}
+        ${buildWaveformStationDetailSection('Channel / Sensitivity', channelItems)}
+      </div>
+      <div class="station-detail-links">
+        <a href="${escapeHtml(info.urls.stationTextUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">Station text</a>
+        <a href="${escapeHtml(info.urls.channelTextUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">Channel text</a>
+        <a href="${escapeHtml(info.urls.responseXmlUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">StationXML</a>
+      </div>
+    `;
+    container.classList.remove('hidden');
+  }
+
+  function buildWaveformStationDetailSection(title, items = []) {
+    const rows = items
+      .map(([label, value]) => `
+        <dt>${escapeHtml(label)}</dt>
+        <dd>${escapeHtml(formatWaveformStationDetailValue(value))}</dd>
+      `)
+      .join('');
+
+    return `
+      <section class="station-detail-section">
+        <h4>${escapeHtml(title)}</h4>
+        <dl class="station-detail-list">${rows}</dl>
+      </section>
+    `;
+  }
+
+  function formatWaveformStationDetailValue(value) {
+    if (value === null || value === undefined) return '-';
+    const trimmed = String(value).trim();
+    return trimmed ? trimmed : '-';
   }
 
   function selectFeatureForWaveform(feature) {

@@ -230,8 +230,8 @@
     <section class="card" id="analysis-section">
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="stats">統計グラフ</button>
-        <button class="tab-btn" data-tab="spectrum">応答スペクトル</button>
         <button class="tab-btn" data-tab="waveform">波形ビューア</button>
+        <button class="tab-btn" data-tab="spectrum">応答スペクトル</button>
       </div>
 
       <!-- 統計グラフタブ -->
@@ -245,37 +245,6 @@
         <div class="empty-state" id="charts-empty">
           <div>検索結果が表示されると統計グラフが描画されます</div>
         </div>
-      </div>
-
-      <!-- 応答スペクトルタブ -->
-      <div class="tab-content hidden" id="tab-spectrum">
-        <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          検索結果から地震を選択し、波形ビューアで取得した IRIS 計器補正済み加速度波形から応答スペクトルを計算します。
-          この画面でのファイル読込は行いません。
-        </p>
-        <div class="spectrum-controls">
-          <div class="form-group">
-            <label for="spectrum-damping">減衰定数 (%)</label>
-            <input type="text" id="spectrum-damping" value="5" style="width:100px;">
-          </div>
-          <div class="form-group">
-            <label for="spectrum-type">表示</label>
-            <select id="spectrum-type">
-              <option value="sa">加速度 Sa</option>
-              <option value="sv">速度 Sv</option>
-              <option value="sd">変位 Sd</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>&nbsp;</label>
-            <button class="btn btn-primary btn-sm" id="btn-calc-spectrum" disabled>計算</button>
-          </div>
-        </div>
-        <div class="spectrum-chart-area">
-          <div class="spectrum-chart-box"><canvas id="chart-waveform-input"></canvas></div>
-          <div class="spectrum-chart-box"><canvas id="chart-spectrum"></canvas></div>
-        </div>
-        <div class="spectrum-info" id="spectrum-info" style="display:none;"></div>
       </div>
 
       <!-- 波形ビューアタブ -->
@@ -345,11 +314,43 @@
           </div>
         </div>
         <div class="station-summary hidden" id="waveform-station-summary"></div>
+        <div class="station-detail hidden" id="waveform-station-detail"></div>
         <div class="waveform-display" id="waveform-display">
           <div class="waveform-placeholder">
             地震を選択し、観測点を検索してから波形を表示してください
           </div>
         </div>
+      </div>
+
+      <!-- 応答スペクトルタブ -->
+      <div class="tab-content hidden" id="tab-spectrum">
+        <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+          検索結果から地震を選択し、波形ビューアで取得した IRIS 計器補正済み加速度波形から応答スペクトルを計算します。
+          この画面でのファイル読込は行いません。
+        </p>
+        <div class="spectrum-controls">
+          <div class="form-group">
+            <label for="spectrum-damping">減衰定数 (%)</label>
+            <input type="text" id="spectrum-damping" value="5" style="width:100px;">
+          </div>
+          <div class="form-group">
+            <label for="spectrum-type">表示</label>
+            <select id="spectrum-type">
+              <option value="sa">加速度 Sa</option>
+              <option value="sv">速度 Sv</option>
+              <option value="sd">変位 Sd</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary btn-sm" id="btn-calc-spectrum" disabled>計算</button>
+          </div>
+        </div>
+        <div class="spectrum-chart-area">
+          <div class="spectrum-chart-box"><canvas id="chart-waveform-input"></canvas></div>
+          <div class="spectrum-chart-box"><canvas id="chart-spectrum"></canvas></div>
+        </div>
+        <div class="spectrum-info" id="spectrum-info" style="display:none;"></div>
       </div>
     </section>
 

@@ -1091,6 +1091,94 @@ a:hover {
   font-size: 0.78rem;
 }
 
+.station-detail {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.station-detail.hidden {
+  display: none;
+}
+
+.station-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.station-detail-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.station-detail-title strong {
+  font-size: 0.9rem;
+}
+
+.station-detail-title span,
+.station-detail-status {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.station-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+  padding: 0.9rem;
+}
+
+.station-detail-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 0.8rem;
+}
+
+.station-detail-section h4 {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+}
+
+.station-detail-list {
+  display: grid;
+  grid-template-columns: minmax(96px, 132px) 1fr;
+  gap: 0.45rem 0.75rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.station-detail-list dt {
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-word;
+}
+
+.station-detail-list dd {
+  margin: 0;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.station-detail-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0 0.9rem 0.9rem;
+}
+
+.station-detail .waveform-error {
+  padding: 0.9rem;
+}
+
 .waveform-display {
   min-height: 240px;
   border: 1px solid var(--border);
