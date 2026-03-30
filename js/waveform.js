@@ -6,6 +6,7 @@ const WaveformViewer = (() => {
   const STATION_URL = 'https://service.iris.edu/fdsnws/station/1/query';
   const TIMESERIES_URL = 'https://service.iris.edu/irisws/timeseries/1/query';
   const MAX_PLOT_POINTS = 4000;
+  const AVAILABILITY_CHECK_CONCURRENCY = 6;
 
   let stationData = [];
   let waveformChart = null;
@@ -18,7 +19,7 @@ const WaveformViewer = (() => {
    * @param {number|string|Date} eventTime - 地震発生時刻
    * @returns {Promise<Array>} 観測点リスト
    */
-  async function searchStations(lat, lon, maxRadius = 5, eventTime = null) {
+  async function searchStations(lat, lon, maxRadius = 5, eventTime = null, options = {}) {
     const params = new URLSearchParams({
       latitude: lat,
       longitude: lon,
@@ -44,8 +45,30 @@ const WaveformViewer = (() => {
     }
 
     const text = await resp.text();
-    stationData = parseStationText(text);
-    return stationData;
+    const stations = parseStationText(text);
+
+    if (!options.requireWaveform || !options.starttime || !options.endtime) {
+      stationData = stations;
+      return {
+        stations: stationData,
+        candidateCount: stationData.length,
+        availableCount: stationData.length,
+      };
+    }
+
+    const availableStations = await filterStationsByWaveformAvailability(
+      stations,
+      options.starttime,
+      options.endtime,
+      { filterPreset: options.filterPreset || 'none' }
+    );
+
+    stationData = availableStations;
+    return {
+      stations: stationData,
+      candidateCount: stations.length,
+      availableCount: stationData.length,
+    };
   }
 
   /**
@@ -198,6 +221,44 @@ const WaveformViewer = (() => {
       plotUrl,
       filterPreset: options.filterPreset || 'none',
     });
+  }
+
+  async function filterStationsByWaveformAvailability(stations, starttime, endtime, options = {}) {
+    if (!stations.length) return [];
+
+    const available = [];
+    let currentIndex = 0;
+
+    async function worker() {
+      while (currentIndex < stations.length) {
+        const index = currentIndex++;
+        const station = stations[index];
+        const ok = await canFetchWaveform(station, starttime, endtime, options);
+        if (ok) available.push({ index, station });
+      }
+    }
+
+    const workerCount = Math.min(AVAILABILITY_CHECK_CONCURRENCY, stations.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    return available
+      .sort((a, b) => a.index - b.index)
+      .map(entry => entry.station);
+  }
+
+  async function canFetchWaveform(station, starttime, endtime, options = {}) {
+    const url = getWaveformImageURL(station, starttime, endtime, {
+      ...options,
+      width: 10,
+      height: 10,
+    });
+
+    try {
+      const resp = await fetch(url, { cache: 'no-store' });
+      return resp.ok;
+    } catch (_) {
+      return false;
+    }
   }
 
   function parseWaveformText(text, context = {}) {

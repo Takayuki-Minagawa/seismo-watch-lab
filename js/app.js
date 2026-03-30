@@ -517,23 +517,34 @@
 
       const coords = selectedFeature.geometry.coordinates;
       const radius = parseFloat($('#waveform-radius').value);
+      const timeWindow = WaveformViewer.getTimeWindow(selectedFeature);
 
       btnSearch.disabled = true;
-      btnSearch.textContent = '検索中...';
+      btnSearch.textContent = '検索・確認中...';
 
       try {
-        const stations = await WaveformViewer.searchStations(
+        const result = await WaveformViewer.searchStations(
           coords[1],
           coords[0],
           radius,
-          selectedFeature.properties.time
+          selectedFeature.properties.time,
+          {
+            requireWaveform: true,
+            starttime: timeWindow.starttime,
+            endtime: timeWindow.endtime,
+            filterPreset: filterSel.value,
+          }
         );
-        WaveformViewer.populateStationSelect(stations, 'waveform-station');
+        WaveformViewer.populateStationSelect(result.stations, 'waveform-station');
 
-        if (stations.length === 0) {
+        if (result.candidateCount === 0) {
           Settings.showToast('周辺に観測点が見つかりませんでした。検索半径を広げてください。');
+        } else if (result.availableCount === 0) {
+          Settings.showToast(`候補 ${result.candidateCount} チャンネルを確認しましたが、波形取得可能な観測点はありませんでした`);
+        } else if (result.availableCount !== result.candidateCount) {
+          Settings.showToast(`${result.candidateCount} チャンネルを確認し、${result.availableCount} チャンネルが波形取得可能でした`);
         } else {
-          Settings.showToast(`${stations.length}チャンネルが見つかりました`);
+          Settings.showToast(`${result.availableCount} チャンネルが見つかりました`);
         }
       } catch (err) {
         Settings.showToast(`観測点検索エラー: ${err.message}`);
