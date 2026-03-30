@@ -250,7 +250,7 @@
       <!-- 応答スペクトルタブ -->
       <div class="tab-content hidden" id="tab-spectrum">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          K-NET形式またはCSV形式の加速度データファイルを読み込み、応答スペクトルを計算します。
+          K-NET形式またはCSV形式の加速度データファイル、または波形ビューアで取得したIRIS加速度波形から応答スペクトルを計算します。
         </p>
         <div class="spectrum-controls">
           <div class="form-group">
@@ -291,7 +291,7 @@
       <!-- 波形ビューアタブ -->
       <div class="tab-content hidden" id="tab-waveform">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          IRIS (NSF SAGE) のデータサービスを利用して、選択した地震の波形を表示します。
+          IRIS (NSF SAGE) のデータサービスから計器補正済み加速度の生波形を取得し、フィルタ・表示範囲調整・応答スペクトル連携を行います。
           結果テーブルの行をクリックして地震を選択してください。
         </p>
         <div class="waveform-controls">
@@ -309,6 +309,16 @@
             </select>
           </div>
           <div class="form-group">
+            <label for="waveform-filter">フィルタ</label>
+            <select id="waveform-filter">
+              <option value="none" selected>なし (demean)</option>
+              <option value="lp-1">Low-pass 1 Hz</option>
+              <option value="lp-5">Low-pass 5 Hz</option>
+              <option value="hp-0.1">High-pass 0.1 Hz</option>
+              <option value="hp-1">High-pass 1 Hz</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label>&nbsp;</label>
             <button class="btn btn-sm btn-primary" id="btn-search-stations">観測点を検索</button>
           </div>
@@ -322,10 +332,30 @@
             <label>&nbsp;</label>
             <button class="btn btn-sm btn-accent" id="btn-show-waveform">波形を表示</button>
           </div>
+          <div class="form-group">
+            <label for="waveform-view-start">表示開始 (秒)</label>
+            <input type="number" id="waveform-view-start" value="0" min="0" step="0.1" disabled>
+          </div>
+          <div class="form-group">
+            <label for="waveform-view-end">表示終了 (秒)</label>
+            <input type="number" id="waveform-view-end" value="0" min="0" step="0.1" disabled>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button class="btn btn-sm btn-outline" id="btn-apply-waveform-view" disabled>ズーム適用</button>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button class="btn btn-sm btn-outline" id="btn-reset-waveform-view" disabled>全体表示</button>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button class="btn btn-sm btn-secondary" id="btn-waveform-spectrum" disabled>応答スペクトル作成</button>
+          </div>
         </div>
         <div class="waveform-display" id="waveform-display">
           <div class="waveform-placeholder">
-            地震を選択し、観測点を検索してから波形を表示してください
+            地震を選択し、観測点を検索してから生波形を表示してください
           </div>
         </div>
       </div>

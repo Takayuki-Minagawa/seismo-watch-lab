@@ -14,6 +14,9 @@
   let selectedFeature = null;
   let lastSearchType = 'manual';  // 'manual' | 'quick'
   let lastQuickType = null;       // '24h-4.5' 等
+  let spectrumInputData = null;
+  let currentWaveformData = null;
+  let currentWaveformView = { start: 0, end: null };
   const PAGE_SIZE = 50;
 
   // --- DOM要素 ---
@@ -219,6 +222,11 @@
     currentData = data;
     currentPage = 1;
     currentSort = { key: 'time', asc: false };
+    selectedFeature = null;
+
+    const waveformLabel = $('#waveform-eq-label');
+    if (waveformLabel) waveformLabel.value = '';
+    resetWaveformViewerState();
 
     const count = data.features ? data.features.length : 0;
     els.resultsCount.textContent = `検索結果: ${count}件`;
@@ -442,25 +450,22 @@
   // ===== 分析タブ =====
   function initTabs() {
     $$('.tab-bar .tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const target = btn.dataset.tab;
+      btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+    });
+  }
 
-        // ボタン切替
-        $$('.tab-bar .tab-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+  function activateTab(target) {
+    $$('.tab-bar .tab-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === target);
+    });
 
-        // コンテンツ切替
-        $$('#analysis-section .tab-content').forEach(tc => {
-          tc.classList.toggle('hidden', tc.id !== `tab-${target}`);
-        });
-      });
+    $$('#analysis-section .tab-content').forEach(tc => {
+      tc.classList.toggle('hidden', tc.id !== `tab-${target}`);
     });
   }
 
   // ===== 応答スペクトルツール =====
   function initSpectrumTool() {
-    let loadedData = null;
-
     const btnCalc = $('#btn-calc-spectrum');
     const fileInput = $('#spectrum-file');
 
@@ -472,30 +477,14 @@
       reader.onload = (e) => {
         try {
           const format = $('#spectrum-format').value;
+          let loadedData = null;
           if (format === 'knet') {
             loadedData = Spectrum.parseKNET(e.target.result);
           } else {
             loadedData = Spectrum.parseCSV(e.target.result);
           }
 
-          // 波形表示
-          Spectrum.renderWaveform(loadedData.acc, loadedData.dt, 'chart-waveform-input');
-
-          // メタ情報表示
-          const info = $('#spectrum-info');
-          if (info) {
-            info.style.display = '';
-            const m = loadedData.meta;
-            info.innerHTML = `
-              <strong>読込完了:</strong>
-              データ点数: ${m._npts} /
-              サンプリング間隔: ${m._dt.toFixed(4)}秒 /
-              継続時間: ${m._duration.toFixed(1)}秒 /
-              最大加速度: ${m._maxAcc.toFixed(2)} gal
-              ${m['Station Code'] ? ' / 観測点: ' + m['Station Code'] : ''}
-              ${m['Dir.'] ? ' / 成分: ' + m['Dir.'] : ''}
-            `;
-          }
+          setSpectrumInput(loadedData, `${file.name} を読込`);
 
           Settings.showToast(`${file.name} を読み込みました`);
         } catch (err) {
@@ -505,45 +494,20 @@
       reader.readAsText(file);
     });
 
-    btnCalc.addEventListener('click', () => {
-      if (!loadedData) {
-        Settings.showToast('先にデータファイルを読み込んでください');
-        return;
-      }
-
-      const dampingStr = $('#spectrum-damping').value;
-      const dampings = dampingStr.split(',').map(s => parseFloat(s.trim()) / 100).filter(d => !isNaN(d) && d > 0);
-      if (dampings.length === 0) {
-        Settings.showToast('減衰定数を正しく入力してください');
-        return;
-      }
-
-      Settings.showToast('応答スペクトルを計算中...');
-
-      // 重い計算をsetTimeoutで非同期に
-      setTimeout(() => {
-        try {
-          const result = Spectrum.computeSpectrum(loadedData.acc, loadedData.dt, {
-            hList: dampings,
-            periodMin: 0.02,
-            periodMax: 10.0,
-            periodCount: 100,
-          });
-
-          const type = $('#spectrum-type').value;
-          Spectrum.renderSpectrum(result, 'chart-spectrum', type);
-          Settings.showToast('応答スペクトルの計算が完了しました');
-        } catch (err) {
-          Settings.showToast(`計算エラー: ${err.message}`);
-        }
-      }, 50);
-    });
+    btnCalc.addEventListener('click', calculateSpectrumForLoadedData);
   }
 
   // ===== 波形ビューア =====
   function initWaveformViewer() {
     const btnSearch = $('#btn-search-stations');
     const btnShow = $('#btn-show-waveform');
+    const btnApplyView = $('#btn-apply-waveform-view');
+    const btnResetView = $('#btn-reset-waveform-view');
+    const btnSpectrum = $('#btn-waveform-spectrum');
+    const stationSel = $('#waveform-station');
+    const filterSel = $('#waveform-filter');
+
+    resetWaveformViewerState();
 
     btnSearch.addEventListener('click', async () => {
       if (!selectedFeature) {
@@ -579,8 +543,7 @@
       }
     });
 
-    btnShow.addEventListener('click', () => {
-      const stationSel = $('#waveform-station');
+    btnShow.addEventListener('click', async () => {
       if (!stationSel.value) {
         Settings.showToast('観測点を選択してください');
         return;
@@ -592,8 +555,208 @@
 
       const station = JSON.parse(stationSel.value);
       const timeWindow = WaveformViewer.getTimeWindow(selectedFeature);
-      WaveformViewer.displayWaveform(station, timeWindow.starttime, timeWindow.endtime, 'waveform-display');
+      btnShow.disabled = true;
+      btnShow.textContent = '取得中...';
+
+      try {
+        currentWaveformData = await WaveformViewer.displayWaveform(
+          station,
+          timeWindow.starttime,
+          timeWindow.endtime,
+          'waveform-display',
+          { filterPreset: filterSel.value }
+        );
+        currentWaveformView = {
+          start: 0,
+          end: currentWaveformData.meta._duration,
+        };
+        setWaveformViewControlsEnabled(true, currentWaveformView.end);
+        updateWaveformViewInputs(currentWaveformView.start, currentWaveformView.end);
+        syncWaveformToSpectrum('IRIS 加速度波形');
+        Settings.showToast('IRIS 生波形を取得しました');
+      } catch (err) {
+        currentWaveformData = null;
+        currentWaveformView = { start: 0, end: null };
+        setWaveformViewControlsEnabled(false);
+        WaveformViewer.resetDisplay('waveform-display');
+        Settings.showToast(`波形取得エラー: ${err.message}`);
+      } finally {
+        btnShow.disabled = false;
+        btnShow.textContent = '波形を表示';
+      }
     });
+
+    btnApplyView.addEventListener('click', () => {
+      if (!currentWaveformData) {
+        Settings.showToast('先に生波形を表示してください');
+        return;
+      }
+
+      try {
+        currentWaveformView = getWaveformViewRangeFromInputs();
+        WaveformViewer.renderWaveform(currentWaveformData, 'waveform-display', currentWaveformView);
+        syncWaveformToSpectrum('IRIS 加速度波形');
+      } catch (err) {
+        Settings.showToast(err.message);
+      }
+    });
+
+    btnResetView.addEventListener('click', () => {
+      if (!currentWaveformData) return;
+      currentWaveformView = {
+        start: 0,
+        end: currentWaveformData.meta._duration,
+      };
+      updateWaveformViewInputs(currentWaveformView.start, currentWaveformView.end);
+      WaveformViewer.renderWaveform(currentWaveformData, 'waveform-display', currentWaveformView);
+      syncWaveformToSpectrum('IRIS 加速度波形');
+    });
+
+    btnSpectrum.addEventListener('click', () => {
+      if (!currentWaveformData) {
+        Settings.showToast('先に生波形を表示してください');
+        return;
+      }
+
+      syncWaveformToSpectrum('IRIS 加速度波形');
+      activateTab('spectrum');
+      calculateSpectrumForLoadedData();
+    });
+  }
+
+  function setSpectrumInput(data, sourceLabel = '') {
+    spectrumInputData = data;
+    Spectrum.renderWaveform(data.acc, data.dt, 'chart-waveform-input');
+
+    const info = $('#spectrum-info');
+    if (info) {
+      info.style.display = '';
+      info.innerHTML = buildSpectrumInfoHtml(data.meta, sourceLabel);
+    }
+  }
+
+  function buildSpectrumInfoHtml(meta = {}, sourceLabel = '') {
+    const parts = [];
+    parts.push(`<strong>${escapeHtml(sourceLabel || '入力データをセットしました')}</strong>`);
+    parts.push(`データ点数: ${meta._npts}`);
+    parts.push(`サンプリング間隔: ${meta._dt.toFixed(4)}秒`);
+    parts.push(`継続時間: ${meta._duration.toFixed(1)}秒`);
+    parts.push(`最大加速度: ${meta._maxAcc.toFixed(2)} gal`);
+
+    if (meta['Station Code']) parts.push(`観測点: ${escapeHtml(meta['Station Code'])}`);
+    if (meta['Dir.']) parts.push(`成分: ${escapeHtml(meta['Dir.'])}`);
+    if (meta._stationId) parts.push(`観測点: ${escapeHtml(meta._stationId)}`);
+    if (meta._filterLabel) parts.push(`フィルタ: ${escapeHtml(meta._filterLabel)}`);
+    if (Number.isFinite(meta._analysisWindowStart) && Number.isFinite(meta._analysisWindowEnd)) {
+      parts.push(`解析区間: ${meta._analysisWindowStart.toFixed(1)} - ${meta._analysisWindowEnd.toFixed(1)} 秒`);
+    }
+
+    return parts.join(' / ');
+  }
+
+  function calculateSpectrumForLoadedData() {
+    if (!spectrumInputData) {
+      Settings.showToast('先に加速度データを読み込むか、波形を表示してください');
+      return;
+    }
+
+    const dampingStr = $('#spectrum-damping').value;
+    const dampings = dampingStr.split(',').map(s => parseFloat(s.trim()) / 100).filter(d => !isNaN(d) && d > 0);
+    if (dampings.length === 0) {
+      Settings.showToast('減衰定数を正しく入力してください');
+      return;
+    }
+
+    Settings.showToast('応答スペクトルを計算中...');
+
+    setTimeout(() => {
+      try {
+        const result = Spectrum.computeSpectrum(spectrumInputData.acc, spectrumInputData.dt, {
+          hList: dampings,
+          periodMin: 0.02,
+          periodMax: 10.0,
+          periodCount: 100,
+        });
+
+        const type = $('#spectrum-type').value;
+        Spectrum.renderSpectrum(result, 'chart-spectrum', type);
+        Settings.showToast('応答スペクトルの計算が完了しました');
+      } catch (err) {
+        Settings.showToast(`計算エラー: ${err.message}`);
+      }
+    }, 50);
+  }
+
+  function syncWaveformToSpectrum(sourceLabel = 'IRIS 加速度波形') {
+    if (!currentWaveformData) return null;
+
+    const spectrumData = WaveformViewer.sliceWaveformData(
+      currentWaveformData,
+      currentWaveformView.start,
+      currentWaveformView.end
+    );
+    setSpectrumInput(spectrumData, sourceLabel);
+    return spectrumData;
+  }
+
+  function getWaveformViewRangeFromInputs() {
+    const startInput = $('#waveform-view-start');
+    const endInput = $('#waveform-view-end');
+    const duration = currentWaveformData?.meta?._duration || 0;
+    const minSpan = currentWaveformData?.dt || 0.1;
+
+    let start = parseFloat(startInput?.value || '0');
+    let end = parseFloat(endInput?.value || '');
+    if (!isFinite(start)) start = 0;
+    if (!isFinite(end)) end = duration;
+
+    start = Math.max(0, Math.min(start, duration));
+    end = Math.max(0, Math.min(end, duration));
+
+    if (end <= start) {
+      throw new Error(`表示終了秒は表示開始秒より ${minSpan.toFixed(2)} 秒以上大きくしてください`);
+    }
+
+    updateWaveformViewInputs(start, end);
+    return { start, end };
+  }
+
+  function updateWaveformViewInputs(start, end) {
+    const startInput = $('#waveform-view-start');
+    const endInput = $('#waveform-view-end');
+    if (startInput) startInput.value = start.toFixed(1);
+    if (endInput) endInput.value = end.toFixed(1);
+  }
+
+  function setWaveformViewControlsEnabled(enabled, duration = 0) {
+    ['#waveform-view-start', '#waveform-view-end', '#btn-apply-waveform-view', '#btn-reset-waveform-view', '#btn-waveform-spectrum']
+      .forEach(selector => {
+        const el = $(selector);
+        if (el) el.disabled = !enabled;
+      });
+
+    const endInput = $('#waveform-view-end');
+    if (endInput) {
+      endInput.max = enabled ? duration.toFixed(1) : '0';
+    }
+    const startInput = $('#waveform-view-start');
+    if (startInput) {
+      startInput.max = enabled ? duration.toFixed(1) : '0';
+    }
+  }
+
+  function resetWaveformViewerState() {
+    currentWaveformData = null;
+    currentWaveformView = { start: 0, end: null };
+
+    const stationSel = $('#waveform-station');
+    if (stationSel) {
+      stationSel.innerHTML = '<option value="">-- 先に観測点を検索 --</option>';
+    }
+
+    updateWaveformViewInputs(0, 0);
+    setWaveformViewControlsEnabled(false);
+    WaveformViewer.resetDisplay('waveform-display');
   }
 
   function selectFeatureForWaveform(feature) {
@@ -604,6 +767,7 @@
       const place = I18n.translatePlace(p.place);
       label.value = `M${p.mag?.toFixed(1) || '?'} ${place}`;
     }
+    resetWaveformViewerState();
   }
 
   // --- UI ヘルパー ---
