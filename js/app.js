@@ -558,7 +558,12 @@
       btnSearch.textContent = '検索中...';
 
       try {
-        const stations = await WaveformViewer.searchStations(coords[1], coords[0], radius);
+        const stations = await WaveformViewer.searchStations(
+          coords[1],
+          coords[0],
+          radius,
+          selectedFeature.properties.time
+        );
         WaveformViewer.populateStationSelect(stations, 'waveform-station');
 
         if (stations.length === 0) {

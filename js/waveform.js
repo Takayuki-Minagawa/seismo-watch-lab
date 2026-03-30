@@ -13,9 +13,10 @@ const WaveformViewer = (() => {
    * @param {number} lat - 緯度
    * @param {number} lon - 経度
    * @param {number} maxRadius - 検索半径(度)
+   * @param {number|string|Date} eventTime - 地震発生時刻
    * @returns {Promise<Array>} 観測点リスト
    */
-  async function searchStations(lat, lon, maxRadius = 5) {
+  async function searchStations(lat, lon, maxRadius = 5, eventTime = null) {
     const params = new URLSearchParams({
       latitude: lat,
       longitude: lon,
@@ -25,6 +26,12 @@ const WaveformViewer = (() => {
       nodata: '404',
       channel: 'BH?,HH?',
     });
+
+    if (eventTime) {
+      const irisTime = formatIRISTime(eventTime);
+      params.set('startbefore', irisTime);
+      params.set('endafter', irisTime);
+    }
 
     const url = `${STATION_URL}?${params.toString()}`;
     const resp = await fetch(url);
@@ -83,8 +90,8 @@ const WaveformViewer = (() => {
       sta: station.station,
       loc: station.location || '--',
       cha: station.channel,
-      starttime: starttime,
-      endtime: endtime,
+      starttime: normalizeIRISTimeValue(starttime),
+      endtime: normalizeIRISTimeValue(endtime),
       output: 'plot',
       width: 800,
       height: 250,
@@ -144,9 +151,26 @@ const WaveformViewer = (() => {
     const end = new Date(originTime.getTime() + durationMinutes * 60 * 1000);
 
     return {
-      starttime: start.toISOString(),
-      endtime: end.toISOString(),
+      starttime: formatIRISTime(start),
+      endtime: formatIRISTime(end),
     };
+  }
+
+  function normalizeIRISTimeValue(value) {
+    if (value instanceof Date || typeof value === 'number') {
+      return formatIRISTime(value);
+    }
+
+    if (typeof value !== 'string') {
+      return value;
+    }
+
+    return value.replace(/\.\d+Z$/, '').replace(/Z$/, '');
+  }
+
+  function formatIRISTime(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    return date.toISOString().replace(/\.\d{3}Z$/, '');
   }
 
   /**
@@ -196,5 +220,6 @@ const WaveformViewer = (() => {
     getTimeWindow,
     displayWaveform,
     getWaveformImageURL,
+    formatIRISTime,
   };
 })();
