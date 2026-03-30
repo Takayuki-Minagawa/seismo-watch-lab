@@ -2,7 +2,7 @@
  * Service Worker - SeismoWatch Lab
  * アプリシェルのキャッシュとオフライン対応
  */
-const CACHE_NAME = 'seismo-v1';
+const CACHE_NAME = 'seismo-v2';
 const APP_SHELL = [
   './',
   './index.html',
@@ -71,10 +71,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // アプリシェル: キャッシュ優先、失敗時ネットワーク
+  // アプリシェル: ネットワーク優先で常に更新を取り込み、失敗時のみキャッシュ
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request);
-    })
+    fetch(event.request)
+      .then((resp) => {
+        if (event.request.method === 'GET' && resp.ok) {
+          const clone = resp.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return resp;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
