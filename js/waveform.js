@@ -145,7 +145,7 @@ const WaveformViewer = (() => {
         const opt = document.createElement('option');
         opt.value = JSON.stringify(channel);
         opt.dataset.stationKey = channel.stationKey;
-        opt.textContent = `${channel.channel} [${channel.location || '--'}] / ${formatDistance(channel.distanceKm)} / ${formatMaxAcc(channel.previewMaxAcc)}`;
+        opt.textContent = `${channel.channel} [${channel.location || '--'}] / ${formatDistance(channel.distanceKm)} / ${formatMaxAcc(channel.previewMaxAcc, channel.previewUnit)}`;
         group.appendChild(opt);
       });
 
@@ -253,6 +253,7 @@ const WaveformViewer = (() => {
         previewDuration: data.meta._duration,
         previewNpts: data.meta._npts,
         previewSampleRate: data.meta._sampleRate,
+        previewUnit: data.meta._displayUnit || 'gal',
       };
     } catch (_) {
       return null;
@@ -319,6 +320,12 @@ const WaveformViewer = (() => {
     const sampleCountMatch = header.match(/,\s*(\d+)\s+samples,/);
     const sampleRateMatch = header.match(/,\s*([\d.]+)\s+sps,/);
     const startTimeMatch = header.match(/,\s*([\d-]{4}-\d{2}-\d{2}T[\d:.]+),\s*TSPAIR/);
+    const headerUnit = extractWaveformHeaderUnit(header);
+    const unitInfo = getAccelerationUnitInfo(headerUnit);
+
+    if (!unitInfo) {
+      throw new Error(`IRIS が加速度単位として解釈できない波形を返しました (${headerUnit || 'unknown'})`);
+    }
 
     const acc = [];
     for (let i = 1; i < lines.length; i++) {
@@ -327,7 +334,7 @@ const WaveformViewer = (() => {
 
       const value = parseFloat(parts[parts.length - 1]);
       if (!isNaN(value)) {
-        acc.push(value * 100); // IRIS ACC は m/s² とみなし gal に変換
+        acc.push(value * unitInfo.toGalFactor);
       }
     }
 
@@ -368,7 +375,41 @@ const WaveformViewer = (() => {
         _timeWindowStart: normalizeIRISTimeValue(context.starttime),
         _timeWindowEnd: normalizeIRISTimeValue(context.endtime),
         _source: 'IRIS corrected acceleration',
+        _inputUnit: headerUnit || '',
+        _displayUnit: unitInfo.displayUnit,
       },
+    };
+  }
+
+  function extractWaveformHeaderUnit(header = '') {
+    const parts = header.split(',').map(part => part.trim()).filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : '';
+  }
+
+  function getAccelerationUnitInfo(unit = '') {
+    const normalized = unit.toUpperCase().replace(/\s+/g, '');
+
+    if (normalized === 'GAL') {
+      return { toGalFactor: 1, displayUnit: 'gal' };
+    }
+
+    const match = normalized.match(/^([A-Z]+)\/(?:(?:S|SEC)(?:\*\*2|\^2|2)|(?:S|SEC)\/(?:S|SEC))$/);
+    if (!match) return null;
+
+    const factorByPrefix = {
+      M: 100,
+      CM: 1,
+      MM: 0.1,
+      UM: 0.0001,
+      NM: 0.0000001,
+    };
+
+    const toGalFactor = factorByPrefix[match[1]];
+    if (!toGalFactor) return null;
+
+    return {
+      toGalFactor,
+      displayUnit: 'gal',
     };
   }
 
@@ -480,11 +521,11 @@ const WaveformViewer = (() => {
         <span>点数: ${waveformSlice.meta._npts}</span>
         <span>dt: ${waveformSlice.meta._dt.toFixed(4)} 秒</span>
         <span>表示範囲: ${range.start.toFixed(1)} - ${range.end.toFixed(1)} 秒</span>
-        <span>最大加速度: ${waveformSlice.meta._maxAcc.toFixed(2)} gal</span>
+        <span>最大加速度: ${waveformSlice.meta._maxAcc.toFixed(2)} ${data.meta._displayUnit || 'gal'}</span>
         <span>フィルタ: ${escapeHtml(data.meta._filterLabel || 'なし')}</span>
       </div>
       <div class="waveform-info">
-        <span>${escapeHtml(data.meta._source)} / 単位: gal</span>
+        <span>${escapeHtml(data.meta._source)} / 変換元: ${escapeHtml(data.meta._inputUnit || '?')} / 単位: ${escapeHtml(data.meta._displayUnit || 'gal')}</span>
         <span>
           <a href="${data.meta._dataUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">ASCII2</a>
           <a href="${data.meta._plotUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">IRISプロット</a>
@@ -504,7 +545,7 @@ const WaveformViewer = (() => {
       type: 'line',
       data: {
         datasets: [{
-          label: '加速度 (gal)',
+          label: `加速度 (${data.meta._displayUnit || 'gal'})`,
           data: chartPoints,
           borderColor: '#dd6b20',
           borderWidth: 1.2,
@@ -543,7 +584,7 @@ const WaveformViewer = (() => {
           y: {
             title: {
               display: true,
-              text: '加速度 (gal)',
+              text: `加速度 (${data.meta._displayUnit || 'gal'})`,
             },
           },
         },
@@ -626,8 +667,8 @@ const WaveformViewer = (() => {
     return Number.isFinite(distanceKm) ? `${distanceKm.toFixed(1)} km` : '-';
   }
 
-  function formatMaxAcc(maxAcc) {
-    return Number.isFinite(maxAcc) ? `max ${maxAcc.toFixed(2)} gal` : 'max -';
+  function formatMaxAcc(maxAcc, unit = 'gal') {
+    return Number.isFinite(maxAcc) ? `max ${maxAcc.toFixed(2)} ${unit}` : 'max -';
   }
 
   function escapeHtml(str) {

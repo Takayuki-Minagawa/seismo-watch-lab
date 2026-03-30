@@ -522,11 +522,11 @@
         if (result.candidateCount === 0) {
           Settings.showToast('周辺に観測点が見つかりませんでした。検索半径を広げてください。');
         } else if (result.availableCount === 0) {
-          Settings.showToast(`候補 ${result.candidateCount} チャンネルを確認しましたが、波形取得可能な観測点はありませんでした`);
+          Settings.showToast(`候補 ${result.candidateCount} チャンネルを確認しましたが、gal に変換できる加速度波形はありませんでした`);
         } else if (result.availableCount !== result.candidateCount) {
-          Settings.showToast(`${result.candidateCount} チャンネルを確認し、${result.availableCount} チャンネルが波形取得可能でした`);
+          Settings.showToast(`${result.candidateCount} チャンネルを確認し、${result.availableCount} チャンネルで加速度波形を取得できました`);
         } else {
-          Settings.showToast(`${result.availableCount} チャンネルが見つかりました`);
+          Settings.showToast(`${result.availableCount} チャンネルで加速度波形を取得できました`);
         }
       } catch (err) {
         Settings.showToast(`観測点検索エラー: ${err.message}`);
@@ -637,7 +637,7 @@
     parts.push(`データ点数: ${meta._npts}`);
     parts.push(`サンプリング間隔: ${meta._dt.toFixed(4)}秒`);
     parts.push(`継続時間: ${meta._duration.toFixed(1)}秒`);
-    parts.push(`最大加速度: ${meta._maxAcc.toFixed(2)} gal`);
+    parts.push(`最大加速度: ${meta._maxAcc.toFixed(2)} ${meta._displayUnit || 'gal'}`);
 
     if (meta['Station Code']) parts.push(`観測点: ${escapeHtml(meta['Station Code'])}`);
     if (meta['Dir.']) parts.push(`成分: ${escapeHtml(meta['Dir.'])}`);
@@ -792,14 +792,14 @@
         <td>${index + 1}</td>
         <td class="station-summary-code">${escapeHtml(station.stationKey)}</td>
         <td>${station.distanceKm.toFixed(1)} km</td>
-        <td>${station.previewMaxAcc.toFixed(2)} gal</td>
+        <td>${station.previewMaxAcc.toFixed(2)} ${station.previewUnit || 'gal'}</td>
       </tr>
     `).join('');
 
     container.innerHTML = `
       <div class="station-summary-header">
         <strong>観測点候補</strong>
-        <span>${availableCount} / ${candidateCount} チャンネルが波形取得可能</span>
+        <span>${availableCount} / ${candidateCount} チャンネルで加速度波形を取得可能</span>
       </div>
       <div class="station-summary-table-wrap">
         <table class="station-summary-table">
