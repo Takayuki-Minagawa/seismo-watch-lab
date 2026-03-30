@@ -5,6 +5,7 @@
 const DetailPanel = (() => {
   let panelEl = null;
   let isOpen = false;
+  let currentFocusTarget = null;
 
   function init() {
     panelEl = document.getElementById('detail-panel');
@@ -19,6 +20,22 @@ const DetailPanel = (() => {
     // オーバーレイクリックで閉じる
     const overlay = document.getElementById('detail-overlay');
     if (overlay) overlay.addEventListener('click', close);
+
+    const content = document.getElementById('detail-content');
+    if (content) {
+      content.addEventListener('click', (event) => {
+        const actionBtn = event.target.closest('[data-detail-action]');
+        if (!actionBtn) return;
+
+        const action = actionBtn.dataset.detailAction;
+        if (action === 'focus-map') {
+          if (!currentFocusTarget) return;
+          focusMap(currentFocusTarget.lat, currentFocusTarget.lon);
+        } else if (action === 'copy-info') {
+          copyInfo();
+        }
+      });
+    }
   }
 
   /**
@@ -34,6 +51,7 @@ const DetailPanel = (() => {
     const lon = c[0];
     const depth = c[2];
     const mag = p.mag;
+    currentFocusTarget = { lat, lon };
 
     const place = I18n.translatePlace(p.place);
     const magClass = I18n.magnitudeClass(mag);
@@ -120,10 +138,10 @@ const DetailPanel = (() => {
       </div>
 
       <div class="detail-actions">
-        <button class="btn btn-sm btn-secondary" onclick="DetailPanel.focusMap(${lat}, ${lon})">
+        <button type="button" class="btn btn-sm btn-secondary" data-detail-action="focus-map">
           地図でフォーカス
         </button>
-        <button class="btn btn-sm btn-secondary" onclick="DetailPanel.copyInfo()">
+        <button type="button" class="btn btn-sm btn-secondary" data-detail-action="copy-info">
           情報をコピー
         </button>
       </div>
@@ -149,6 +167,7 @@ const DetailPanel = (() => {
   }
 
   function focusMap(lat, lon) {
+    if (!EarthquakeMap || typeof EarthquakeMap.focusOn !== 'function') return;
     EarthquakeMap.focusOn(lat, lon, 8);
   }
 

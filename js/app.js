@@ -201,7 +201,9 @@
     } else if (regionKey !== 'global') {
       const presets = EarthquakeAPI.getRegionPresets();
       const preset = presets[regionKey];
-      if (preset && preset.bounds) {
+      if (preset?.boundsList) {
+        params.boundsList = preset.boundsList;
+      } else if (preset?.bounds) {
         params.minlat = preset.bounds.minlat;
         params.maxlat = preset.bounds.maxlat;
         params.minlon = preset.bounds.minlon;
@@ -284,11 +286,17 @@
         <td class="col-place" title="${escapeHtml(p.place)}">${escapeHtml(place)}</td>
         <td>${p.tsunami ? '<span class="tsunami-icon">&#x1F30A; あり</span>' : '-'}</td>
         <td>${escapeHtml(status)}</td>
-        <td><a href="${p.url}" target="_blank" rel="noopener" onclick="event.stopPropagation()">USGS</a></td>
+        <td><a href="${p.url}" target="_blank" rel="noopener" data-stop-row-click="true">USGS</a></td>
       </tr>`;
     });
 
     els.tbody.innerHTML = html;
+
+    els.tbody.querySelectorAll('[data-stop-row-click]').forEach(link => {
+      link.addEventListener('click', (event) => {
+        event.stopPropagation();
+      });
+    });
 
     // 行クリック: 詳細パネル表示 + 地図フォーカス + 波形ビューア連携
     els.tbody.querySelectorAll('tr[data-lat]').forEach(tr => {
