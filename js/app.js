@@ -522,11 +522,11 @@
         if (result.candidateCount === 0) {
           Settings.showToast('周辺に観測点が見つかりませんでした。検索半径を広げてください。');
         } else if (result.availableCount === 0) {
-          Settings.showToast(`候補 ${result.candidateCount} チャンネルを確認しましたが、gal に変換できる加速度波形はありませんでした`);
+          Settings.showToast(`候補 ${result.candidateCount} チャンネルを確認しましたが、波形取得可能な観測点はありませんでした`);
         } else if (result.availableCount !== result.candidateCount) {
-          Settings.showToast(`${result.candidateCount} チャンネルを確認し、${result.availableCount} チャンネルで加速度波形を取得できました`);
+          Settings.showToast(`${result.candidateCount} チャンネルを確認し、${result.availableCount} チャンネルが波形取得可能でした`);
         } else {
-          Settings.showToast(`${result.availableCount} チャンネルで加速度波形を取得できました`);
+          Settings.showToast(`${result.availableCount} チャンネルが見つかりました`);
         }
       } catch (err) {
         Settings.showToast(`観測点検索エラー: ${err.message}`);

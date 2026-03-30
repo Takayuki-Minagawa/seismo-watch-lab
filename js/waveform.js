@@ -166,20 +166,20 @@ const WaveformViewer = (() => {
   }
 
   function buildWaveformParams(station, starttime, endtime, options = {}, format = 'ascii2') {
-    const params = new URLSearchParams({
-      net: station.network,
-      sta: station.station,
-      loc: station.location || '--',
-      cha: station.channel,
-      starttime: normalizeIRISTimeValue(starttime),
-      endtime: normalizeIRISTimeValue(endtime),
-      correct: 'true',
-      units: 'ACC',
-      demean: 'true',
-    });
+    const params = new URLSearchParams();
+    params.append('net', station.network);
+    params.append('sta', station.station);
+    params.append('loc', station.location || '--');
+    params.append('cha', station.channel);
+    params.append('starttime', normalizeIRISTimeValue(starttime));
+    params.append('endtime', normalizeIRISTimeValue(endtime));
+    params.append('taper', '0.05');
+    params.append('demean', 'true');
+    params.append('correct', 'true');
+    params.append('units', 'ACC');
 
     applyFilterPreset(params, options.filterPreset);
-    params.set('format', format);
+    params.append('format', format);
     return params;
   }
 
@@ -213,7 +213,7 @@ const WaveformViewer = (() => {
       case 'hp-1':
         return 'High-pass 1 Hz';
       default:
-        return 'なし (demean)';
+        return 'なし (taper + demean)';
     }
   }
 
@@ -286,6 +286,7 @@ const WaveformViewer = (() => {
         dataUrl,
         plotUrl,
         filterPreset: options.filterPreset || 'none',
+        requestedUnit: 'ACC',
       });
     })();
 
@@ -321,7 +322,7 @@ const WaveformViewer = (() => {
     const sampleRateMatch = header.match(/,\s*([\d.]+)\s+sps,/);
     const startTimeMatch = header.match(/,\s*([\d-]{4}-\d{2}-\d{2}T[\d:.]+),\s*TSPAIR/);
     const headerUnit = extractWaveformHeaderUnit(header);
-    const unitInfo = getAccelerationUnitInfo(headerUnit);
+    const unitInfo = getAccelerationUnitInfo(headerUnit, context.requestedUnit || 'ACC');
 
     if (!unitInfo) {
       throw new Error(`IRIS が加速度単位として解釈できない波形を返しました (${headerUnit || 'unknown'})`);
@@ -374,8 +375,11 @@ const WaveformViewer = (() => {
         _filterLabel: getFilterLabel(context.filterPreset),
         _timeWindowStart: normalizeIRISTimeValue(context.starttime),
         _timeWindowEnd: normalizeIRISTimeValue(context.endtime),
-        _source: 'IRIS corrected acceleration',
-        _inputUnit: headerUnit || '',
+        _source: unitInfo.assumed
+          ? 'IRIS corrected acceleration (ACC request, metadata reported COUNTS)'
+          : 'IRIS corrected acceleration',
+        _inputUnit: unitInfo.inputLabel,
+        _inputUnitReported: headerUnit || '',
         _displayUnit: unitInfo.displayUnit,
       },
     };
@@ -386,31 +390,49 @@ const WaveformViewer = (() => {
     return parts.length > 0 ? parts[parts.length - 1] : '';
   }
 
-  function getAccelerationUnitInfo(unit = '') {
+  function getAccelerationUnitInfo(unit = '', requestedUnit = 'ACC') {
     const normalized = unit.toUpperCase().replace(/\s+/g, '');
 
     if (normalized === 'GAL') {
-      return { toGalFactor: 1, displayUnit: 'gal' };
+      return {
+        toGalFactor: 1,
+        displayUnit: 'gal',
+        inputLabel: 'gal',
+        assumed: false,
+      };
     }
 
     const match = normalized.match(/^([A-Z]+)\/(?:(?:S|SEC)(?:\*\*2|\^2|2)|(?:S|SEC)\/(?:S|SEC))$/);
-    if (!match) return null;
+    if (match) {
+      const factorByPrefix = {
+        M: 100,
+        CM: 1,
+        MM: 0.1,
+        UM: 0.0001,
+        NM: 0.0000001,
+      };
 
-    const factorByPrefix = {
-      M: 100,
-      CM: 1,
-      MM: 0.1,
-      UM: 0.0001,
-      NM: 0.0000001,
-    };
+      const toGalFactor = factorByPrefix[match[1]];
+      if (!toGalFactor) return null;
 
-    const toGalFactor = factorByPrefix[match[1]];
-    if (!toGalFactor) return null;
+      return {
+        toGalFactor,
+        displayUnit: 'gal',
+        inputLabel: unit,
+        assumed: false,
+      };
+    }
 
-    return {
-      toGalFactor,
-      displayUnit: 'gal',
-    };
+    if (normalized === 'COUNTS' && requestedUnit === 'ACC') {
+      return {
+        toGalFactor: 100,
+        displayUnit: 'gal',
+        inputLabel: 'ACC request (IRIS metadata: COUNTS)',
+        assumed: true,
+      };
+    }
+
+    return null;
   }
 
   function estimateDtFromDataLines(lines) {
@@ -525,7 +547,7 @@ const WaveformViewer = (() => {
         <span>フィルタ: ${escapeHtml(data.meta._filterLabel || 'なし')}</span>
       </div>
       <div class="waveform-info">
-        <span>${escapeHtml(data.meta._source)} / 変換元: ${escapeHtml(data.meta._inputUnit || '?')} / 単位: ${escapeHtml(data.meta._displayUnit || 'gal')}</span>
+        <span>${escapeHtml(data.meta._source)} / 解釈: ${escapeHtml(data.meta._inputUnit || '?')} / 単位: ${escapeHtml(data.meta._displayUnit || 'gal')}</span>
         <span>
           <a href="${data.meta._dataUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">ASCII2</a>
           <a href="${data.meta._plotUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">IRISプロット</a>
