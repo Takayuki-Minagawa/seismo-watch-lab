@@ -1175,6 +1175,17 @@ a:hover {
   padding: 0 0.9rem 0.9rem;
 }
 
+.station-detail-note {
+  margin: 0 0.9rem 0.9rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
 .station-detail .waveform-error {
   padding: 0.9rem;
 }

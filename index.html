@@ -252,6 +252,7 @@
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
           IRIS (NSF SAGE) のデータサービスから計器補正済み加速度波形を取得し、距離順の観測点一覧、フィルタ、表示範囲調整、応答スペクトル連携を行います。
           既定の生ダウンロード値は COUNTS のため、このビューアでは <code>correct=true&amp;units=ACC</code> を指定して物理単位へ変換した波形を利用します。
+          <strong>グラフ表示が gal の場合でも、ブラウザ側で速度波形を微分しているわけではなく、EarthScope / IRIS が <code>ACC</code> 指定で返した加速度を表示しています。</strong>
           結果テーブルの行をクリックして地震を選択してください。
         </p>
         <div class="waveform-controls">

@@ -931,6 +931,7 @@
     const channelRow = info.channelRow || {};
     const siteName = siteRow.SiteName || channelRow.SiteName || '';
     const titleCode = info.stationKey || `${channelRow.Network || ''}.${channelRow.Station || ''}.${channelRow.Location || '--'}.${channelRow.Channel || ''}`;
+    const measurementNote = buildWaveformStationMeasurementNote(channelRow);
 
     const siteItems = [
       ['Network', siteRow.Network || channelRow.Network],
@@ -973,6 +974,7 @@
         ${buildWaveformStationDetailSection('Site / Station', siteItems)}
         ${buildWaveformStationDetailSection('Channel / Sensitivity', channelItems)}
       </div>
+      <div class="station-detail-note">${escapeHtml(measurementNote)}</div>
       <div class="station-detail-links">
         <a href="${escapeHtml(info.urls.stationTextUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">Station text</a>
         <a href="${escapeHtml(info.urls.channelTextUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">Channel text</a>
@@ -1002,6 +1004,15 @@
     if (value === null || value === undefined) return '-';
     const trimmed = String(value).trim();
     return trimmed ? trimmed : '-';
+  }
+
+  function buildWaveformStationMeasurementNote(channelRow = {}) {
+    const scaleUnits = String(channelRow.ScaleUnits || '').trim();
+    if (scaleUnits.toLowerCase() === 'm/s') {
+      return 'この観測点の感度定義は m/s で、元の計器は速度系です。ただし、このアプリの波形グラフは correct=true&units=ACC で EarthScope / IRIS が返した加速度を gal 表示したもので、ブラウザ側で速度波形を微分していません。';
+    }
+
+    return 'このアプリの波形グラフは correct=true&units=ACC で EarthScope / IRIS が返した加速度を gal 表示したもので、ブラウザ側で数値微分はしていません。';
   }
 
   function selectFeatureForWaveform(feature) {

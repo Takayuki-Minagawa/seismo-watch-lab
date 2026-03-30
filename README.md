@@ -60,6 +60,7 @@
 - 計器補正済み加速度波形を Chart.js で表示
 - 生データの `COUNTS` は直接使わず、`correct=true&units=ACC` による計器補正済み波形を利用
 - 観測点選択時に `SiteName`、`Scale`、`ScaleFreq`、`ScaleUnits` などの公開メタデータを表示
+- `ScaleUnits` が `m/s` の観測点でも、グラフの `gal` は EarthScope / IRIS が `ACC` 指定で返した加速度であり、ブラウザ側の微分ではない
 - Low-pass / High-pass フィルタ切り替え
 - 表示開始・終了秒を指定したズーム表示
 - 表示中の波形区間から応答スペクトルを直接作成
