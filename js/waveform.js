@@ -92,14 +92,30 @@ const WaveformViewer = (() => {
     }
 
     const url = `${searchUrl}?${params.toString()}`;
-    const resp = await fetch(url);
+
+    let resp;
+    try {
+      resp = await fetch(url);
+    } catch (networkErr) {
+      throw new Error(`${dc.label} に接続できませんでした。ネットワーク接続またはCORS制限の可能性があります`);
+    }
 
     if (!resp.ok) {
       if (resp.status === 404) return { stations: [], candidateCount: 0, availableCount: 0 };
       throw new Error(`観測点検索エラー (${dc.label}: HTTP ${resp.status})`);
     }
 
-    const text = await resp.text();
+    let text;
+    try {
+      text = await resp.text();
+    } catch (readErr) {
+      throw new Error(`${dc.label} からのレスポンスの読み取りに失敗しました`);
+    }
+
+    if (!text || !text.trim()) {
+      return { stations: [], candidateCount: 0, availableCount: 0 };
+    }
+
     const stations = sortStationsByDistance(parseStationText(text), lat, lon);
 
     stations.forEach(s => {

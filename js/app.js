@@ -789,19 +789,32 @@
     if (!container) return;
 
     if (!stations.length) {
-      container.innerHTML = '';
-      container.classList.add('hidden');
+      const noResultReason = candidateCount > 0
+        ? `候補 ${candidateCount} チャンネルを確認しましたが、IRIS経由で波形取得可能な観測点はありませんでした。`
+        : '周辺に観測点が見つかりませんでした。検索半径やデータセンターを変更してお試しください。';
+      const dcInfo = dcLabel ? ` <span style="font-size:0.8rem; color:var(--text-secondary);">(${escapeHtml(dcLabel)})</span>` : '';
+      container.innerHTML = `
+        <div class="station-summary-header">
+          <strong>観測点候補</strong>${dcInfo}
+        </div>
+        <p style="padding:0.5rem 0.75rem; color:var(--text-secondary); margin:0;">${escapeHtml(noResultReason)}</p>
+      `;
+      container.classList.remove('hidden');
       return;
     }
 
-    const rows = stations.map((station, index) => `
-      <tr data-station-key="${escapeHtml(station.stationKey)}">
-        <td>${index + 1}</td>
-        <td class="station-summary-code">${escapeHtml(station.stationKey)}</td>
-        <td>${station.distanceKm.toFixed(1)} km</td>
-        <td>${station.previewMaxAcc.toFixed(2)} ${station.previewUnit || 'gal'}</td>
-      </tr>
-    `).join('');
+    const rows = stations.map((station, index) => {
+      const dist = Number.isFinite(station.distanceKm) ? `${station.distanceKm.toFixed(1)} km` : '-- km';
+      const maxAcc = Number.isFinite(station.previewMaxAcc) ? `${station.previewMaxAcc.toFixed(2)} ${station.previewUnit || 'gal'}` : '--';
+      return `
+        <tr data-station-key="${escapeHtml(station.stationKey)}">
+          <td>${index + 1}</td>
+          <td class="station-summary-code">${escapeHtml(station.stationKey)}</td>
+          <td>${dist}</td>
+          <td>${maxAcc}</td>
+        </tr>
+      `;
+    }).join('');
 
     const dcInfo = dcLabel ? ` <span style="font-size:0.8rem; color:var(--text-secondary);">(観測点検索: ${escapeHtml(dcLabel)} / 波形取得: IRIS)</span>` : '';
 
