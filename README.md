@@ -51,13 +51,22 @@
 - 減衰定数の設定（複数指定可）
 - Sa（加速度）・Sv（速度）・Sd（変位）の3種類の出力
 
-### IRIS波形ビューア
-- IRIS (NSF SAGE) FDSN Web Servicesとの連携
+### FDSN波形ビューア（マルチデータセンター対応）
+- 複数のFDSN準拠データセンターから観測点を検索可能
+  - **IRIS / EarthScope** (グローバル)
+  - **GEOFON / GFZ** (グローバル・欧州)
+  - **GeoNet** (ニュージーランド)
+  - **NCEDC** (北カリフォルニア)
+  - **SCEDC** (南カリフォルニア)
+  - **ORFEUS / ODC** (欧州)
+  - **INGV** (イタリア)
+  - **RESIF** (フランス)
+  - **ETH Zürich** (スイス)
 - 震央周辺の観測局検索（探索半径: 2°〜20°）
 - 観測点を震央距離順にソートし、近い観測点を優先表示
 - 観測点検索時に、実際に波形取得可能なチャンネルのみ表示
 - 観測点ごとの距離と最大加速度を一覧表示
-- 計器補正済み加速度波形を Chart.js で表示
+- 計器補正済み加速度波形を Chart.js で表示（波形取得は IRIS 経由）
 - 生データの `COUNTS` は直接使わず、`correct=true&units=ACC` による計器補正済み波形を利用
 - 観測点選択時に `SiteName`、`Scale`、`ScaleFreq`、`ScaleUnits` などの公開メタデータを表示
 - `ScaleUnits` が `m/s` の観測点でも、グラフの `gal` は EarthScope / IRIS が `ACC` 指定で返した加速度であり、ブラウザ側の微分ではない
@@ -85,7 +94,7 @@
 - ホーム画面への追加・スタンドアロンアプリとしてインストール可能
 
 ### 参考情報リンク
-気象庁・防災科学技術研究所・USGS等の関連情報へのリンクを掲載しています。
+気象庁・防災科学技術研究所・USGS・FDSN準拠データセンター等の関連情報へのリンクを掲載しています。
 
 ## 技術構成
 
@@ -95,7 +104,7 @@
 | 地図ライブラリ | [Leaflet](https://leafletjs.com/) 1.9.4 |
 | グラフライブラリ | [Chart.js](https://www.chartjs.org/) 4.4.7 |
 | 地図タイル | [OpenStreetMap](https://www.openstreetmap.org/) |
-| データソース | [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/)、[IRIS FDSN Web Services](https://service.iris.edu/) |
+| データソース | [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/)、[IRIS FDSN Web Services](https://service.iris.edu/)、複数のFDSNデータセンター |
 | PWA | Service Worker によるオフラインサポート |
 | ホスティング | GitHub Pages |
 | ビルドツール | 不要（静的ファイルのみ） |
@@ -122,11 +131,14 @@ npx serve .
 ## 波形ビューアと応答スペクトルの使い方
 
 1. 地震を検索し、結果テーブルの行をクリックして対象地震を選択します。
-2. `波形ビューア` タブで探索半径を選び、`観測点を検索` で周辺チャンネルを取得します。結果は距離順に並び、波形取得可能なチャンネルだけが候補に残り、各観測点の距離と最大加速度が一覧表示されます。
-3. 観測点一覧またはプルダウンから観測点を選ぶと、`SiteName`、`Scale` などの公開メタデータと raw metadata へのリンクが表示されます。
-4. `波形を表示` を押すと、IRIS から `correct=true&units=ACC` を付けた計器補正済み加速度波形を取得して表示します。
-5. 必要に応じてフィルタや表示区間を調整し、`応答スペクトル作成` でその区間のスペクトルを計算します。
-6. 応答スペクトルタブは、波形ビューアで取得した波形のみを対象とし、ファイル読込は行いません。
+2. `波形ビューア` タブで**データセンター**を選びます（既定は IRIS / EarthScope）。地震の発生地域に応じて、GeoNet（NZ）やORFEUS（欧州）等を選ぶと、ローカル観測網の観測点が見つかりやすくなります。
+3. 探索半径を選び、`観測点を検索` で周辺チャンネルを取得します。結果は距離順に並び、IRIS経由で波形取得可能なチャンネルだけが候補に残り、各観測点の距離と最大加速度が一覧表示されます。
+4. 観測点一覧またはプルダウンから観測点を選ぶと、`SiteName`、`Scale` などの公開メタデータと raw metadata へのリンクが表示されます。
+5. `波形を表示` を押すと、IRIS から `correct=true&units=ACC` を付けた計器補正済み加速度波形を取得して表示します。
+6. 必要に応じてフィルタや表示区間を調整し、`応答スペクトル作成` でその区間のスペクトルを計算します。
+7. 応答スペクトルタブは、波形ビューアで取得した波形のみを対象とし、ファイル読込は行いません。
+
+> **補足**: 観測点の検索は選択したデータセンターのFDSN station APIで行いますが、波形データの取得は常にIRISの timeseries サービス経由です。IRISに連携データがない観測点については波形取得に失敗する場合があります。
 
 ## データ出典・ライセンス
 
@@ -147,7 +159,10 @@ npx serve .
 
 - [気象庁](https://www.jma.go.jp/) - 地震情報、震度データベース、震央分布図
 - [防災科学技術研究所 (NIED)](https://www.bosai.go.jp/) - K-NET/KiK-net、Hi-net、J-SHIS
-- [IRIS / NSF SAGE](https://www.iris.edu/hq/) - Seismic Monitor、Web Services (FDSN)、Data Management Center（波形ビューアで利用）
+- [IRIS / NSF SAGE (EarthScope)](https://www.iris.edu/hq/) - Seismic Monitor、Web Services (FDSN)、Data Management Center（波形ビューアで利用）
+- [GEOFON / GFZ](https://geofon.gfz-potsdam.de/) - FDSN Web Services（波形ビューア観測点検索で利用）
+- [GeoNet](https://www.geonet.org.nz/) - ニュージーランド地震観測網（波形ビューア観測点検索で利用）
+- [ORFEUS / EIDA](https://www.orfeus-eu.org/) - 欧州統合地震データアーカイブ（波形ビューア観測点検索で利用）
 - [EMSC (欧州地中海地震学センター)](https://www.emsc-csem.org/)
 
 各外部サイトのデータ利用については、それぞれの利用規約に従ってください。

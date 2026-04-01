@@ -250,15 +250,29 @@
       <!-- 波形ビューアタブ -->
       <div class="tab-content hidden" id="tab-waveform">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          IRIS (NSF SAGE) のデータサービスから計器補正済み加速度波形を取得し、距離順の観測点一覧、フィルタ、表示範囲調整、応答スペクトル連携を行います。
+          複数のFDSNデータセンター（IRIS、GEOFON、GeoNet等）から観測点を検索し、IRIS (EarthScope) のデータサービスで計器補正済み加速度波形を取得します。
           既定の生ダウンロード値は COUNTS のため、このビューアでは <code>correct=true&amp;units=ACC</code> を指定して物理単位へ変換した波形を利用します。
-          <strong>グラフ表示が gal の場合でも、ブラウザ側で速度波形を微分しているわけではなく、EarthScope / IRIS が <code>ACC</code> 指定で返した加速度を表示しています。</strong>
+          <strong>波形データの取得は常に IRIS 経由で行われます（他DCで見つかった観測点も、IRISの連携データで取得を試みます）。</strong>
           結果テーブルの行をクリックして地震を選択してください。
         </p>
         <div class="waveform-controls">
           <div class="form-group">
             <label>選択中の地震</label>
             <input type="text" id="waveform-eq-label" readonly placeholder="テーブルから地震を選択" style="min-width:250px;">
+          </div>
+          <div class="form-group">
+            <label for="waveform-datacenter">データセンター</label>
+            <select id="waveform-datacenter">
+              <option value="iris" selected>IRIS / EarthScope (グローバル)</option>
+              <option value="geofon">GEOFON / GFZ (グローバル・欧州)</option>
+              <option value="geonet">GeoNet (ニュージーランド)</option>
+              <option value="ncedc">NCEDC (北カリフォルニア)</option>
+              <option value="scedc">SCEDC (南カリフォルニア)</option>
+              <option value="orfeus">ORFEUS / ODC (欧州)</option>
+              <option value="ingv">INGV (イタリア)</option>
+              <option value="resif">RESIF (フランス)</option>
+              <option value="ethz">ETH Zürich (スイス)</option>
+            </select>
           </div>
           <div class="form-group">
             <label for="waveform-radius">検索半径 (度)</label>
@@ -365,10 +379,10 @@
           <!-- 気象庁 -->
           <div class="resource-item">
             <h3>
-              <a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_information" target="_blank" rel="noopener">気象庁 地震情報</a>
+              <a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_map" target="_blank" rel="noopener">気象庁 震央分布図</a>
               <span class="resource-tag">JMA</span>
             </h3>
-            <p>日本国内の地震情報をリアルタイムで提供。震度分布図や各地の震度一覧を地図上で確認できます。</p>
+            <p>日本周辺の震央分布を地図上で視覚的に確認できるインタラクティブマップです。地震情報も確認できます。</p>
           </div>
           <div class="resource-item">
             <h3>
@@ -376,13 +390,6 @@
               <span class="resource-tag">JMA</span>
             </h3>
             <p>過去の地震の震度データを検索可能。地点・期間を指定して詳細な震度情報を取得できます。</p>
-          </div>
-          <div class="resource-item">
-            <h3>
-              <a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_map" target="_blank" rel="noopener">気象庁 震央分布図</a>
-              <span class="resource-tag">JMA</span>
-            </h3>
-            <p>日本周辺の震央分布を地図上で視覚的に確認できるインタラクティブマップです。</p>
           </div>
 
           <!-- 防災科研 -->

@@ -494,6 +494,7 @@
 
       const coords = selectedFeature.geometry.coordinates;
       const radius = parseFloat($('#waveform-radius').value);
+      const datacenter = $('#waveform-datacenter').value;
       const timeWindow = WaveformViewer.getTimeWindow(selectedFeature);
 
       btnSearch.disabled = true;
@@ -510,10 +511,12 @@
             starttime: timeWindow.starttime,
             endtime: timeWindow.endtime,
             filterPreset: filterSel.value,
+            datacenter: datacenter,
           }
         );
+        const dcLabel = (WaveformViewer.getDatacenters()[datacenter] || {}).label || datacenter;
         WaveformViewer.populateStationSelect(result.stations, 'waveform-station');
-        renderWaveformStationSummary(result.stations, result.candidateCount, result.availableCount);
+        renderWaveformStationSummary(result.stations, result.candidateCount, result.availableCount, dcLabel);
 
         if (result.stations.length > 0 && stationSel.options.length > 1) {
           stationSel.selectedIndex = 1;
@@ -521,13 +524,13 @@
         }
 
         if (result.candidateCount === 0) {
-          Settings.showToast('周辺に観測点が見つかりませんでした。検索半径を広げてください。');
+          Settings.showToast(`${dcLabel}: 周辺に観測点が見つかりませんでした。検索半径やデータセンターを変更してください。`);
         } else if (result.availableCount === 0) {
-          Settings.showToast(`候補 ${result.candidateCount} チャンネルを確認しましたが、波形取得可能な観測点はありませんでした`);
+          Settings.showToast(`${dcLabel}: 候補 ${result.candidateCount} チャンネルを確認しましたが、IRIS経由で波形取得可能な観測点はありませんでした`);
         } else if (result.availableCount !== result.candidateCount) {
-          Settings.showToast(`${result.candidateCount} チャンネルを確認し、${result.availableCount} チャンネルが波形取得可能でした`);
+          Settings.showToast(`${dcLabel}: ${result.candidateCount} チャンネル中 ${result.availableCount} チャンネルがIRIS経由で波形取得可能`);
         } else {
-          Settings.showToast(`${result.availableCount} チャンネルが見つかりました`);
+          Settings.showToast(`${dcLabel}: ${result.availableCount} チャンネルが見つかりました`);
         }
       } catch (err) {
         Settings.showToast(`観測点検索エラー: ${err.message}`);
@@ -781,7 +784,7 @@
     }
   }
 
-  function renderWaveformStationSummary(stations, candidateCount = 0, availableCount = 0) {
+  function renderWaveformStationSummary(stations, candidateCount = 0, availableCount = 0, dcLabel = '') {
     const container = $('#waveform-station-summary');
     if (!container) return;
 
@@ -800,10 +803,12 @@
       </tr>
     `).join('');
 
+    const dcInfo = dcLabel ? ` <span style="font-size:0.8rem; color:var(--text-secondary);">(観測点検索: ${escapeHtml(dcLabel)} / 波形取得: IRIS)</span>` : '';
+
     container.innerHTML = `
       <div class="station-summary-header">
         <strong>観測点候補</strong>
-        <span>${availableCount} / ${candidateCount} チャンネルで加速度波形を取得可能</span>
+        <span>${availableCount} / ${candidateCount} チャンネルで加速度波形を取得可能${dcInfo}</span>
       </div>
       <div class="station-summary-table-wrap">
         <table class="station-summary-table">

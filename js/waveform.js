@@ -3,10 +3,59 @@
  * IRIS FDSN Web Servicesを利用して計器補正済み加速度波形を表示
  */
 const WaveformViewer = (() => {
-  const STATION_URL = 'https://service.iris.edu/fdsnws/station/1/query';
+  const IRIS_STATION_URL = 'https://service.iris.edu/fdsnws/station/1/query';
   const TIMESERIES_URL = 'https://service.iris.edu/irisws/timeseries/1/query';
   const MAX_PLOT_POINTS = 4000;
   const STATION_PREVIEW_CONCURRENCY = 4;
+
+  /** FDSN準拠データセンター定義 */
+  const FDSN_DATACENTERS = {
+    iris: {
+      label: 'IRIS / EarthScope',
+      region: 'グローバル',
+      stationUrl: 'https://service.iris.edu/fdsnws/station/1/query',
+    },
+    geofon: {
+      label: 'GEOFON (GFZ)',
+      region: 'グローバル・欧州',
+      stationUrl: 'https://geofon.gfz-potsdam.de/fdsnws/station/1/query',
+    },
+    geonet: {
+      label: 'GeoNet',
+      region: 'ニュージーランド',
+      stationUrl: 'https://service.geonet.org.nz/fdsnws/station/1/query',
+    },
+    ncedc: {
+      label: 'NCEDC',
+      region: '北カリフォルニア',
+      stationUrl: 'https://service.ncedc.org/fdsnws/station/1/query',
+    },
+    scedc: {
+      label: 'SCEDC',
+      region: '南カリフォルニア',
+      stationUrl: 'https://service.scedc.caltech.edu/fdsnws/station/1/query',
+    },
+    orfeus: {
+      label: 'ORFEUS (ODC)',
+      region: '欧州',
+      stationUrl: 'https://www.orfeus-eu.org/fdsnws/station/1/query',
+    },
+    ingv: {
+      label: 'INGV',
+      region: 'イタリア',
+      stationUrl: 'https://webservices.ingv.it/fdsnws/station/1/query',
+    },
+    resif: {
+      label: 'RESIF',
+      region: 'フランス',
+      stationUrl: 'https://ws.resif.fr/fdsnws/station/1/query',
+    },
+    ethz: {
+      label: 'ETH Zürich',
+      region: 'スイス',
+      stationUrl: 'https://eida.ethz.ch/fdsnws/station/1/query',
+    },
+  };
 
   let stationData = [];
   let waveformChart = null;
@@ -22,6 +71,10 @@ const WaveformViewer = (() => {
    * @returns {Promise<Object>} 観測点リストと集計
    */
   async function searchStations(lat, lon, maxRadius = 5, eventTime = null, options = {}) {
+    const dcId = options.datacenter || 'iris';
+    const dc = FDSN_DATACENTERS[dcId] || FDSN_DATACENTERS.iris;
+    const searchUrl = dc.stationUrl;
+
     const params = new URLSearchParams({
       latitude: lat,
       longitude: lon,
@@ -38,16 +91,21 @@ const WaveformViewer = (() => {
       params.set('endafter', irisTime);
     }
 
-    const url = `${STATION_URL}?${params.toString()}`;
+    const url = `${searchUrl}?${params.toString()}`;
     const resp = await fetch(url);
 
     if (!resp.ok) {
-      if (resp.status === 404) return [];
-      throw new Error(`観測点検索エラー (HTTP ${resp.status})`);
+      if (resp.status === 404) return { stations: [], candidateCount: 0, availableCount: 0 };
+      throw new Error(`観測点検索エラー (${dc.label}: HTTP ${resp.status})`);
     }
 
     const text = await resp.text();
     const stations = sortStationsByDistance(parseStationText(text), lat, lon);
+
+    stations.forEach(s => {
+      s._datacenter = dcId;
+      s._datacenterLabel = dc.label;
+    });
 
     if (!options.requireWaveform || !options.starttime || !options.endtime) {
       stationData = stations;
@@ -185,7 +243,7 @@ const WaveformViewer = (() => {
       params.set('endafter', irisTime);
     }
 
-    return `${STATION_URL}?${params.toString()}`;
+    return `${IRIS_STATION_URL}?${params.toString()}`;
   }
 
   function getStationPublicInfoCacheKey(station, eventTime = null) {
@@ -904,6 +962,10 @@ const WaveformViewer = (() => {
     return div.innerHTML;
   }
 
+  function getDatacenters() {
+    return FDSN_DATACENTERS;
+  }
+
   return {
     searchStations,
     populateStationSelect,
@@ -918,5 +980,6 @@ const WaveformViewer = (() => {
     getWaveformDataURL,
     getWaveformImageURL,
     formatIRISTime,
+    getDatacenters,
   };
 })();
