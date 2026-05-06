@@ -5,6 +5,9 @@
 const EarthquakeMap = (() => {
   let map = null;
   let markerGroup = null;
+  let currentGeojson = null;
+  let currentClickCallback = null;
+  let styleMode = 'magnitude';
 
   // マグニチュードに応じた色
   function magColor(mag) {
@@ -28,6 +31,31 @@ const EarthquakeMap = (() => {
     if (mag < 7) return 14;
     if (mag < 8) return 18;
     return 24;
+  }
+
+  function depthColor(depth) {
+    if (depth === null || depth === undefined) return '#999';
+    if (depth < 30) return '#d7263d';
+    if (depth < 70) return '#f46036';
+    if (depth < 300) return '#2e86ab';
+    return '#4b3f72';
+  }
+
+  function recencyColor(time) {
+    if (!time) return '#999';
+    const ageHours = (Date.now() - time) / (60 * 60 * 1000);
+    if (ageHours <= 1) return '#d7263d';
+    if (ageHours <= 24) return '#f46036';
+    if (ageHours <= 168) return '#2e86ab';
+    return '#6b7280';
+  }
+
+  function markerColor(feature) {
+    const coords = feature.geometry.coordinates;
+    const props = feature.properties;
+    if (styleMode === 'depth') return depthColor(coords[2]);
+    if (styleMode === 'recency') return recencyColor(props.time);
+    return magColor(props.mag);
   }
 
   /**
@@ -57,7 +85,10 @@ const EarthquakeMap = (() => {
    * @param {Object} geojson - USGS GeoJSON レスポンス
    * @param {Function} onClickCallback - マーカークリック時のコールバック
    */
-  function displayEarthquakes(geojson, onClickCallback) {
+  function displayEarthquakes(geojson, onClickCallback, options = {}) {
+    const shouldFit = options.fit !== false;
+    currentGeojson = geojson;
+    currentClickCallback = onClickCallback;
     clearMarkers();
 
     if (!geojson || !geojson.features || geojson.features.length === 0) {
@@ -76,7 +107,7 @@ const EarthquakeMap = (() => {
 
       bounds.push([lat, lon]);
 
-      const color = magColor(mag);
+      const color = markerColor(feature);
       const radius = magRadius(mag);
 
       const marker = L.circleMarker([lat, lon], {
@@ -113,7 +144,7 @@ const EarthquakeMap = (() => {
     });
 
     // 全マーカーが見える範囲にフィット
-    if (bounds.length > 0) {
+    if (shouldFit && bounds.length > 0) {
       try {
         map.fitBounds(bounds, { padding: [30, 30], maxZoom: 8 });
       } catch (e) {
@@ -140,6 +171,32 @@ const EarthquakeMap = (() => {
     }
   }
 
+  function reset() {
+    currentGeojson = null;
+    currentClickCallback = null;
+    clearMarkers();
+  }
+
+  function setStyleMode(mode) {
+    styleMode = ['magnitude', 'depth', 'recency'].includes(mode) ? mode : 'magnitude';
+    updateModeHint();
+    if (currentGeojson) {
+      displayEarthquakes(currentGeojson, currentClickCallback, { fit: false });
+    }
+  }
+
+  function updateModeHint() {
+    const hint = document.getElementById('map-mode-hint');
+    if (!hint) return;
+    if (styleMode === 'depth') {
+      hint.textContent = '赤:浅い / 青紫:深い';
+    } else if (styleMode === 'recency') {
+      hint.textContent = '赤:1時間以内 / 橙:24時間以内';
+    } else {
+      hint.textContent = 'Mが大きいほど濃色';
+    }
+  }
+
   /**
    * 地図のリサイズ対応
    */
@@ -152,8 +209,10 @@ const EarthquakeMap = (() => {
   return {
     init,
     displayEarthquakes,
+    setStyleMode,
     focusOn,
     clearMarkers,
+    reset,
     invalidateSize,
     magColor,
   };

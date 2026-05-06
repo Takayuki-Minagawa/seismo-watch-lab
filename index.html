@@ -160,10 +160,41 @@
       </div>
     </section>
 
+    <!-- 地震ワールドモニター -->
+    <section class="card monitor-panel" id="monitor-panel">
+      <div class="card-header">
+        <span>&#x1F4E1;</span> 地震ワールドモニター
+      </div>
+      <div class="card-body">
+        <div class="monitor-grid" id="monitor-cards">
+          <div class="monitor-empty">検索結果が表示されると監視サマリーを描画します</div>
+        </div>
+        <div class="monitor-detail-grid">
+          <div class="monitor-box">
+            <h3>地域ホットスポット</h3>
+            <div id="monitor-hotspots" class="monitor-list empty">--</div>
+          </div>
+          <div class="monitor-box">
+            <h3>要注意イベント</h3>
+            <div id="monitor-watchlist" class="monitor-list empty">--</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- 地図セクション -->
     <section class="card">
       <div class="card-header">
         <span>&#x1F5FA;</span> 震央マップ
+        <div class="map-header-actions">
+          <label for="map-color-mode">色分け</label>
+          <select id="map-color-mode">
+            <option value="magnitude" selected>マグニチュード</option>
+            <option value="depth">深さ</option>
+            <option value="recency">発生時刻</option>
+          </select>
+          <span id="map-mode-hint" class="map-mode-hint" aria-live="polite">Mが大きいほど濃色</span>
+        </div>
       </div>
       <div class="legend">
         <span class="legend-title">マグニチュード:</span>
@@ -512,6 +543,7 @@
   <script src="js/download.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/settings.js"></script>
+  <script src="js/monitor.js"></script>
   <script src="js/detail.js"></script>
   <script src="js/spectrum.js"></script>
   <script src="js/waveform.js"></script>

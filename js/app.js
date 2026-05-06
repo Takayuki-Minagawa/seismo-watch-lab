@@ -57,8 +57,14 @@
 
     // 地図初期化
     EarthquakeMap.init('map');
+    const mapColorMode = $('#map-color-mode');
+    if (mapColorMode) {
+      mapColorMode.addEventListener('change', () => EarthquakeMap.setStyleMode(mapColorMode.value));
+      EarthquakeMap.setStyleMode(mapColorMode.value);
+    }
 
     // 拡張モジュール初期化
+    MonitorDashboard.init();
     Settings.initDarkMode();
     Settings.initAutoRefresh(() => {
       if (lastSearchType === 'quick' && lastQuickType) {
@@ -247,7 +253,8 @@
           </div>
         </td></tr>`;
       els.pagination.style.display = 'none';
-      EarthquakeMap.clearMarkers();
+      EarthquakeMap.reset();
+      MonitorDashboard.clear();
       Charts.clearAll();
       if (els.chartsEmpty) els.chartsEmpty.style.display = '';
       return;
@@ -260,6 +267,9 @@
 
     // 地図表示
     EarthquakeMap.displayEarthquakes(data, onMarkerClick);
+
+    // 監視ダッシュボード
+    MonitorDashboard.render(data);
 
     // 統計グラフ
     if (els.chartsEmpty) els.chartsEmpty.style.display = 'none';
