@@ -2,7 +2,7 @@
  * Service Worker - SeismoWatch Lab
  * アプリシェルのキャッシュとオフライン対応
  */
-const CACHE_NAME = 'seismo-v2';
+const CACHE_NAME = 'seismo-v3';
 const APP_SHELL = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const APP_SHELL = [
   './js/download.js',
   './js/charts.js',
   './js/settings.js',
+  './js/monitor.js',
   './js/detail.js',
   './js/spectrum.js',
   './js/waveform.js',
