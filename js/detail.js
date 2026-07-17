@@ -6,6 +6,7 @@ const DetailPanel = (() => {
   let panelEl = null;
   let isOpen = false;
   let currentFocusTarget = null;
+  let returnFocusElement = null;
 
   function init() {
     panelEl = document.getElementById('detail-panel');
@@ -15,6 +16,7 @@ const DetailPanel = (() => {
     // Escキーで閉じる
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && isOpen) close();
+      if (e.key === 'Tab' && isOpen) trapFocus(e);
     });
 
     // オーバーレイクリックで閉じる
@@ -59,6 +61,16 @@ const DetailPanel = (() => {
     const timeJST = I18n.formatDateJST(p.time);
     const timeUTC = I18n.formatDateUTC(p.time);
     const status = I18n.translateTerm(p.status) || p.status;
+    const updatedJST = p.updated ? I18n.formatDateJST(p.updated) : '';
+    const eventType = p.type || 'earthquake';
+    const felt = toFiniteNumber(p.felt);
+    const cdi = toFiniteNumber(p.cdi);
+    const mmi = toFiniteNumber(p.mmi);
+    const significance = toFiniteNumber(p.sig);
+    const detailUrl = AppUtils.sanitizeUrlForOrigins(p.url, ['https://earthquake.usgs.gov']);
+    const detailLink = detailUrl
+      ? `<a href="${AppUtils.escapeHtml(detailUrl)}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">USGS 詳細ページ</a>`
+      : '';
 
     // 日本付近かどうか判定（JMA/K-NETリンク表示用）
     const isNearJapan = lat >= 20 && lat <= 50 && lon >= 120 && lon <= 155;
@@ -99,30 +111,46 @@ const DetailPanel = (() => {
           <span class="detail-value">${escapeHtml(status)}</span>
         </div>
         <div class="detail-item">
-          <span class="detail-label">津波情報</span>
-          <span class="detail-value">${p.tsunami ? '\uD83C\uDF0A あり' : 'なし'}</span>
+          <span class="detail-label">USGS津波関連フラグ</span>
+          <span class="detail-value">${p.tsunami ? 'あり（警報ではありません）' : 'なし'}</span>
         </div>
-        ${p.felt ? `<div class="detail-item">
+        ${updatedJST ? `<div class="detail-item">
+          <span class="detail-label">USGS更新日時 (JST)</span>
+          <span class="detail-value">${escapeHtml(updatedJST)}</span>
+        </div>` : ''}
+        ${p.magType ? `<div class="detail-item">
+          <span class="detail-label">マグニチュード種別</span>
+          <span class="detail-value">${escapeHtml(p.magType)}</span>
+        </div>` : ''}
+        <div class="detail-item">
+          <span class="detail-label">イベント種別</span>
+          <span class="detail-value">${escapeHtml(eventType)}</span>
+        </div>
+        ${p.alert ? `<div class="detail-item">
+          <span class="detail-label">USGS PAGER評価</span>
+          <span class="detail-value">${escapeHtml(p.alert)}</span>
+        </div>` : ''}
+        ${felt !== null ? `<div class="detail-item">
           <span class="detail-label">体感報告数</span>
-          <span class="detail-value">${p.felt}件</span>
+          <span class="detail-value">${felt.toFixed(0)}件</span>
         </div>` : ''}
-        ${p.cdi ? `<div class="detail-item">
+        ${cdi !== null ? `<div class="detail-item">
           <span class="detail-label">最大体感震度 (MMI)</span>
-          <span class="detail-value">${p.cdi.toFixed(1)}</span>
+          <span class="detail-value">${cdi.toFixed(1)}</span>
         </div>` : ''}
-        ${p.mmi ? `<div class="detail-item">
+        ${mmi !== null ? `<div class="detail-item">
           <span class="detail-label">最大計測震度 (MMI)</span>
-          <span class="detail-value">${p.mmi.toFixed(1)}</span>
+          <span class="detail-value">${mmi.toFixed(1)}</span>
         </div>` : ''}
-        ${p.sig ? `<div class="detail-item">
+        ${significance !== null ? `<div class="detail-item">
           <span class="detail-label">重要度スコア</span>
-          <span class="detail-value">${p.sig}</span>
+          <span class="detail-value">${significance.toFixed(0)}</span>
         </div>` : ''}
       </div>
 
       <div class="detail-links">
         <h4>外部リンク</h4>
-        <a href="${p.url}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">USGS 詳細ページ</a>
+        ${detailLink}
 
         ${isNearJapan ? `
           <a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_information"
@@ -152,23 +180,69 @@ const DetailPanel = (() => {
 
   function open() {
     if (!panelEl) return;
+    returnFocusElement = document.activeElement;
     panelEl.classList.add('open');
+    panelEl.removeAttribute('inert');
+    panelEl.setAttribute('aria-hidden', 'false');
+    setBackgroundInert(true);
     const overlay = document.getElementById('detail-overlay');
-    if (overlay) overlay.classList.add('active');
+    if (overlay) {
+      overlay.classList.add('active');
+      overlay.setAttribute('aria-hidden', 'false');
+    }
     isOpen = true;
+    document.getElementById('detail-close')?.focus();
   }
 
   function close() {
     if (!panelEl) return;
     panelEl.classList.remove('open');
+    panelEl.setAttribute('inert', '');
+    panelEl.setAttribute('aria-hidden', 'true');
+    setBackgroundInert(false);
     const overlay = document.getElementById('detail-overlay');
-    if (overlay) overlay.classList.remove('active');
+    if (overlay) {
+      overlay.classList.remove('active');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
     isOpen = false;
+    if (returnFocusElement && typeof returnFocusElement.focus === 'function') {
+      returnFocusElement.focus();
+    }
+    returnFocusElement = null;
   }
 
   function focusMap(lat, lon) {
     if (!EarthquakeMap || typeof EarthquakeMap.focusOn !== 'function') return;
     EarthquakeMap.focusOn(lat, lon, 8);
+  }
+
+  function trapFocus(event) {
+    if (!panelEl) return;
+    const focusable = Array.from(panelEl.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ));
+    if (focusable.length === 0) {
+      event.preventDefault();
+      panelEl.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function setBackgroundInert(inert) {
+    document.querySelectorAll('.header, .main, .footer').forEach(element => {
+      if (inert) element.setAttribute('inert', '');
+      else element.removeAttribute('inert');
+    });
   }
 
   function copyInfo() {
@@ -178,15 +252,20 @@ const DetailPanel = (() => {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text).then(() => {
         Settings.showToast('情報をコピーしました');
-      });
+      }).catch(() => prompt('以下の情報をコピーしてください:', text));
+    } else {
+      prompt('以下の情報をコピーしてください:', text);
     }
   }
 
+  function toFiniteNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
   function escapeHtml(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    return AppUtils.escapeHtml(str);
   }
 
   return { init, show, close, focusMap, copyInfo };

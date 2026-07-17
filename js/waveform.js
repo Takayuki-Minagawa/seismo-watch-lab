@@ -7,6 +7,10 @@ const WaveformViewer = (() => {
   const TIMESERIES_URL = 'https://service.iris.edu/irisws/timeseries/1/query';
   const MAX_PLOT_POINTS = 4000;
   const STATION_PREVIEW_CONCURRENCY = 4;
+  const STATION_PREVIEW_LIMIT = 12;
+  const WAVEFORM_CACHE_LIMIT = 8;
+  const STATION_INFO_CACHE_LIMIT = 20;
+  const CHANNEL_PATTERN = 'HN?,BN?,EN?,HH?,BH?';
 
   /** FDSN準拠データセンター定義 */
   const FDSN_DATACENTERS = {
@@ -61,6 +65,7 @@ const WaveformViewer = (() => {
   let waveformChart = null;
   const waveformDataCache = new Map();
   const stationPublicInfoCache = new Map();
+  let stationPublicInfoCacheGeneration = 0;
 
   /**
    * 震央付近の観測点を検索
@@ -82,7 +87,7 @@ const WaveformViewer = (() => {
       level: 'channel',
       format: 'text',
       nodata: '404',
-      channel: 'BH?,HH?',
+      channel: CHANNEL_PATTERN,
     });
 
     if (eventTime) {
@@ -94,26 +99,28 @@ const WaveformViewer = (() => {
     const url = `${searchUrl}?${params.toString()}`;
 
     let resp;
+    let text;
     try {
-      resp = await fetch(url);
+      const result = await AppUtils.fetchTextWithTimeout(url, {
+        signal: options.signal,
+        timeoutMs: options.timeoutMs || 20000,
+        timeoutMessage: `${dc.label} の観測点検索がタイムアウトしました`,
+      });
+      resp = result.response;
+      text = result.text;
     } catch (networkErr) {
+      if (AppUtils.isAbortError(networkErr)) throw networkErr;
+      if (networkErr?.message?.includes('タイムアウト')) throw networkErr;
       throw new Error(`${dc.label} に接続できませんでした。ネットワーク接続またはCORS制限の可能性があります`);
     }
 
     if (!resp.ok) {
-      if (resp.status === 404) return { stations: [], candidateCount: 0, availableCount: 0 };
+      if (resp.status === 404) return { stations: [], candidateCount: 0, checkedCount: 0, availableCount: 0 };
       throw new Error(`観測点検索エラー (${dc.label}: HTTP ${resp.status})`);
     }
 
-    let text;
-    try {
-      text = await resp.text();
-    } catch (readErr) {
-      throw new Error(`${dc.label} からのレスポンスの読み取りに失敗しました`);
-    }
-
     if (!text || !text.trim()) {
-      return { stations: [], candidateCount: 0, availableCount: 0 };
+      return { stations: [], candidateCount: 0, checkedCount: 0, availableCount: 0 };
     }
 
     const stations = sortStationsByDistance(parseStationText(text), lat, lon);
@@ -128,23 +135,38 @@ const WaveformViewer = (() => {
       return {
         stations: stationData,
         candidateCount: stationData.length,
+        checkedCount: stationData.length,
         availableCount: stationData.length,
       };
     }
 
+    const previewLimit = normalizePreviewLimit(options.previewLimit);
+    const previewCandidates = stations.slice(0, previewLimit);
     const availableStations = await buildStationPreviews(
-      stations,
+      previewCandidates,
       options.starttime,
       options.endtime,
-      { filterPreset: options.filterPreset || 'none' }
+      {
+        filterPreset: options.filterPreset || 'none',
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+      }
     );
 
     stationData = availableStations;
     return {
       stations: stationData,
       candidateCount: stations.length,
+      checkedCount: previewCandidates.length,
       availableCount: stationData.length,
     };
+  }
+
+  function normalizePreviewLimit(value) {
+    if (value === undefined || value === null || value === '') return STATION_PREVIEW_LIMIT;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 1) return STATION_PREVIEW_LIMIT;
+    return Math.min(parsed, 100);
   }
 
   /**
@@ -269,49 +291,54 @@ const WaveformViewer = (() => {
     ].join('|');
   }
 
-  async function fetchStationPublicInfo(station, eventTime = null) {
+  async function fetchStationPublicInfo(station, eventTime = null, options = {}) {
     const cacheKey = getStationPublicInfoCacheKey(station, eventTime);
     if (stationPublicInfoCache.has(cacheKey)) {
       return stationPublicInfoCache.get(cacheKey);
     }
 
-    const task = (async () => {
-      const stationTextUrl = buildStationQueryURL(station, 'station', 'text', eventTime);
-      const channelTextUrl = buildStationQueryURL(station, 'channel', 'text', eventTime);
-      const responseXmlUrl = buildStationQueryURL(station, 'response', 'xml', eventTime);
-      const siteRow = await fetchStationSiteRow(stationTextUrl);
+    const cacheGeneration = stationPublicInfoCacheGeneration;
+    const stationTextUrl = buildStationQueryURL(station, 'station', 'text', eventTime);
+    const channelTextUrl = buildStationQueryURL(station, 'channel', 'text', eventTime);
+    const responseXmlUrl = buildStationQueryURL(station, 'response', 'xml', eventTime);
+    const siteRow = await fetchStationSiteRow(stationTextUrl, options);
+    const info = {
+      stationKey: station.stationKey,
+      siteRow,
+      channelRow: station._rawChannelMetadata || buildFallbackChannelRow(station),
+      urls: {
+        stationTextUrl,
+        channelTextUrl,
+        responseXmlUrl,
+      },
+    };
 
-      return {
-        stationKey: station.stationKey,
-        siteRow,
-        channelRow: station._rawChannelMetadata || buildFallbackChannelRow(station),
-        urls: {
-          stationTextUrl,
-          channelTextUrl,
-          responseXmlUrl,
-        },
-      };
-    })();
+    if (cacheGeneration === stationPublicInfoCacheGeneration && !options.signal?.aborted) {
+      setStationPublicInfoCache(cacheKey, info);
+    }
+    return info;
+  }
 
-    stationPublicInfoCache.set(cacheKey, task);
-    try {
-      const info = await task;
-      stationPublicInfoCache.set(cacheKey, Promise.resolve(info));
-      return info;
-    } catch (err) {
-      stationPublicInfoCache.delete(cacheKey);
-      throw err;
+  function setStationPublicInfoCache(cacheKey, info) {
+    if (stationPublicInfoCache.has(cacheKey)) stationPublicInfoCache.delete(cacheKey);
+    stationPublicInfoCache.set(cacheKey, info);
+    while (stationPublicInfoCache.size > STATION_INFO_CACHE_LIMIT) {
+      stationPublicInfoCache.delete(stationPublicInfoCache.keys().next().value);
     }
   }
 
-  async function fetchStationSiteRow(url) {
-    const resp = await fetch(url, { cache: 'no-store' });
+  async function fetchStationSiteRow(url, options = {}) {
+    const { response: resp, text } = await AppUtils.fetchTextWithTimeout(url, {
+      cache: 'no-store',
+      signal: options.signal,
+      timeoutMs: options.timeoutMs || 15000,
+      timeoutMessage: '観測点メタデータ取得がタイムアウトしました',
+    });
     if (!resp.ok) {
       if (resp.status === 404) return {};
       throw new Error(`観測点メタデータ取得エラー (HTTP ${resp.status})`);
     }
 
-    const text = await resp.text();
     const rows = parseFdsnTextTable(text).rows;
     return rows[0] || {};
   }
@@ -346,8 +373,21 @@ const WaveformViewer = (() => {
       }))
       .sort((a, b) => {
         if (a.distanceKm !== b.distanceKm) return a.distanceKm - b.distanceKm;
+        const priorityDifference = channelPriority(a.channel) - channelPriority(b.channel);
+        if (priorityDifference !== 0) return priorityDifference;
         return a.stationKey.localeCompare(b.stationKey);
       });
+  }
+
+  function channelPriority(channel = '') {
+    const normalized = String(channel).toUpperCase();
+    const instrument = normalized.slice(0, 2);
+    const orientation = normalized.slice(-1);
+    const instrumentPriority = ['HN', 'BN', 'EN'].includes(instrument) ? 0 : 10;
+    const orientationPriority = ['N', 'E', '1', '2'].includes(orientation)
+      ? 0
+      : orientation === 'Z' ? 2 : 1;
+    return instrumentPriority + orientationPriority;
   }
 
   /**
@@ -462,6 +502,7 @@ const WaveformViewer = (() => {
 
     async function worker() {
       while (currentIndex < stations.length) {
+        if (options.signal?.aborted) throw options.signal.reason || new DOMException('Aborted', 'AbortError');
         const index = currentIndex++;
         const station = stations[index];
         const preview = await fetchStationPreview(station, starttime, endtime, options);
@@ -489,6 +530,7 @@ const WaveformViewer = (() => {
         previewUnit: data.meta._displayUnit || 'gal',
       };
     } catch (_) {
+      if (AppUtils.isAbortError(_)) throw _;
       return null;
     }
   }
@@ -499,39 +541,42 @@ const WaveformViewer = (() => {
       return waveformDataCache.get(cacheKey);
     }
 
-    const task = (async () => {
-      const dataUrl = getWaveformDataURL(station, starttime, endtime, options);
-      const plotUrl = getWaveformImageURL(station, starttime, endtime, options);
-      const resp = await fetch(dataUrl, { cache: 'no-store' });
+    const dataUrl = getWaveformDataURL(station, starttime, endtime, options);
+    const plotUrl = getWaveformImageURL(station, starttime, endtime, options);
+    const { response: resp, text } = await AppUtils.fetchTextWithTimeout(dataUrl, {
+      cache: 'no-store',
+      signal: options.signal,
+      timeoutMs: options.timeoutMs || 30000,
+      timeoutMessage: '波形取得がタイムアウトしました',
+    });
 
-      if (!resp.ok) {
-        if (resp.status === 404) {
-          throw new Error('この観測点・時間帯の波形データは見つかりませんでした');
-        }
-        throw new Error(`波形取得エラー (HTTP ${resp.status})`);
+    if (!resp.ok) {
+      if (resp.status === 404) {
+        throw new Error('この観測点・時間帯の波形データは見つかりませんでした');
       }
+      throw new Error(`波形取得エラー (HTTP ${resp.status})`);
+    }
 
-      const text = await resp.text();
-      return parseWaveformText(text, {
-        station,
-        starttime,
-        endtime,
-        dataUrl,
-        plotUrl,
-        filterPreset: options.filterPreset || 'none',
-        requestedUnit: 'ACC',
-        responseCorrected: true,
-      });
-    })();
+    const data = parseWaveformText(text, {
+      station,
+      starttime,
+      endtime,
+      dataUrl,
+      plotUrl,
+      filterPreset: options.filterPreset || 'none',
+      requestedUnit: 'ACC',
+      responseCorrected: true,
+    });
+    setWaveformCache(cacheKey, data);
+    return data;
+  }
 
-    waveformDataCache.set(cacheKey, task);
-    try {
-      const data = await task;
-      waveformDataCache.set(cacheKey, Promise.resolve(data));
-      return data;
-    } catch (err) {
-      waveformDataCache.delete(cacheKey);
-      throw err;
+  function setWaveformCache(cacheKey, data) {
+    if (waveformDataCache.has(cacheKey)) waveformDataCache.delete(cacheKey);
+    waveformDataCache.set(cacheKey, data);
+    while (waveformDataCache.size > WAVEFORM_CACHE_LIMIT) {
+      const oldestKey = waveformDataCache.keys().next().value;
+      waveformDataCache.delete(oldestKey);
     }
   }
 
@@ -572,6 +617,7 @@ const WaveformViewer = (() => {
     }
 
     const acc = [];
+    const sampleTimes = [];
     for (let i = 1; i < lines.length; i++) {
       const parts = lines[i].trim().split(/\s+/);
       if (parts.length < 2) continue;
@@ -579,6 +625,7 @@ const WaveformViewer = (() => {
       const value = parseFloat(parts[parts.length - 1]);
       if (!isNaN(value)) {
         acc.push(value * unitInfo.toGalFactor);
+        sampleTimes.push(parseIRISTimestamp(parts[0]));
       }
     }
 
@@ -595,6 +642,13 @@ const WaveformViewer = (() => {
     }
 
     const duration = Math.max(0, (acc.length - 1) * dt);
+    const declaredSampleCount = sampleCountMatch ? parseInt(sampleCountMatch[1], 10) : null;
+    const timingQuality = inspectSampleTiming(sampleTimes, dt);
+    const sampleCountMismatch = Number.isInteger(declaredSampleCount) && declaredSampleCount !== acc.length;
+    const timingIssues = [...timingQuality.issues];
+    if (sampleCountMismatch) {
+      timingIssues.push(`ヘッダー宣言 ${declaredSampleCount} 点に対して ${acc.length} 点を読み込みました`);
+    }
     const station = context.station || {};
     const stationId = `${station.network || ''}.${station.station || ''}.${station.location || '--'}.${station.channel || ''}`;
 
@@ -605,9 +659,9 @@ const WaveformViewer = (() => {
         _npts: acc.length,
         _dt: dt,
         _duration: duration,
-        _maxAcc: Math.max(...acc.map(Math.abs)),
+        _maxAcc: AppUtils.maxAbs(acc),
         _sampleRate: sampleRateMatch ? parseFloat(sampleRateMatch[1]) : 1 / dt,
-        _sampleCountHeader: sampleCountMatch ? parseInt(sampleCountMatch[1], 10) : acc.length,
+        _sampleCountHeader: declaredSampleCount ?? acc.length,
         _seriesId: seriesIdMatch ? seriesIdMatch[1] : '',
         _startTime: startTimeMatch ? `${startTimeMatch[1]}Z` : '',
         _stationId: stationId.replace(/^\.+|\.+$/g, ''),
@@ -622,8 +676,39 @@ const WaveformViewer = (() => {
         _inputUnit: unitInfo.inputLabel,
         _inputUnitReported: headerUnit || '',
         _displayUnit: unitInfo.displayUnit,
+        _hasTimingGap: timingQuality.hasGap || sampleCountMismatch,
+        _maxSampleGap: timingQuality.maxGap,
+        _timingIssues: timingIssues,
       },
     };
+  }
+
+  function inspectSampleTiming(sampleTimes, expectedDt) {
+    let hasGap = false;
+    let maxGap = 0;
+    const issues = [];
+    const tolerance = Math.max(expectedDt * 0.25, 0.002);
+
+    const invalidTimestampCount = sampleTimes.filter(time => !(time instanceof Date) || Number.isNaN(time.getTime())).length;
+    if (invalidTimestampCount > 0) {
+      hasGap = true;
+      issues.push(`${invalidTimestampCount} 点の時刻を解析できませんでした`);
+    }
+
+    for (let index = 1; index < sampleTimes.length; index++) {
+      const previous = sampleTimes[index - 1];
+      const current = sampleTimes[index];
+      if (!(previous instanceof Date) || Number.isNaN(previous.getTime())
+          || !(current instanceof Date) || Number.isNaN(current.getTime())) continue;
+      const gap = (current.getTime() - previous.getTime()) / 1000;
+      maxGap = Math.max(maxGap, gap);
+      if (gap <= 0 || Math.abs(gap - expectedDt) > tolerance) {
+        hasGap = true;
+        if (issues.length === 0) issues.push('サンプル時刻の不連続を検出しました');
+      }
+    }
+
+    return { hasGap, maxGap, issues };
   }
 
   function extractWaveformHeaderUnit(header = '') {
@@ -769,13 +854,15 @@ const WaveformViewer = (() => {
 
   function normalizeRange(data, rangeStart = 0, rangeEnd = null) {
     const totalDuration = data.meta?._duration ?? Math.max(0, (data.acc.length - 1) * data.dt);
-    const safeStart = Number.isFinite(rangeStart) ? Math.max(0, rangeStart) : 0;
+    let safeStart = Number.isFinite(rangeStart) ? Math.max(0, Math.min(rangeStart, totalDuration)) : 0;
     let safeEnd = Number.isFinite(rangeEnd) ? Math.min(rangeEnd, totalDuration) : totalDuration;
 
     if (!Number.isFinite(safeEnd) || safeEnd <= safeStart) {
       safeEnd = Math.min(totalDuration, safeStart + Math.max(data.dt * 10, 1));
     }
     if (safeEnd <= safeStart) {
+      const fallbackSpan = Math.max(data.dt * 10, 1);
+      safeStart = Math.max(0, totalDuration - fallbackSpan);
       safeEnd = totalDuration;
     }
 
@@ -784,9 +871,12 @@ const WaveformViewer = (() => {
 
   function sliceWaveformData(data, rangeStart = 0, rangeEnd = null) {
     const range = normalizeRange(data, rangeStart, rangeEnd);
-    const startIndex = Math.max(0, Math.floor(range.start / data.dt));
-    const endIndex = Math.min(data.acc.length, Math.ceil(range.end / data.dt) + 1);
-    const slicedAcc = data.acc.slice(startIndex, endIndex);
+    const startIndex = Math.max(0, AppUtils.sampleIndexAtOrAfter(range.start, data.dt));
+    const endIndex = Math.min(data.acc.length - 1, AppUtils.sampleIndexAtOrBefore(range.end, data.dt));
+    if (endIndex <= startIndex) throw new RangeError('表示区間には2点以上のサンプルが必要です');
+    const slicedAcc = data.acc.slice(startIndex, endIndex + 1);
+    const effectiveStart = startIndex * data.dt;
+    const effectiveEnd = endIndex * data.dt;
 
     return {
       acc: slicedAcc,
@@ -795,9 +885,11 @@ const WaveformViewer = (() => {
         ...data.meta,
         _npts: slicedAcc.length,
         _duration: Math.max(0, (slicedAcc.length - 1) * data.dt),
-        _maxAcc: slicedAcc.length > 0 ? Math.max(...slicedAcc.map(Math.abs)) : 0,
-        _analysisWindowStart: range.start,
-        _analysisWindowEnd: range.end,
+        _maxAcc: AppUtils.maxAbs(slicedAcc),
+        _requestedWindowStart: range.start,
+        _requestedWindowEnd: range.end,
+        _analysisWindowStart: effectiveStart,
+        _analysisWindowEnd: effectiveEnd,
       },
     };
   }
@@ -806,10 +898,24 @@ const WaveformViewer = (() => {
     const container = document.getElementById(containerId);
     if (!container) return { start: 0, end: 0 };
 
-    const range = normalizeRange(data, options.rangeStart, options.rangeEnd);
+    const range = normalizeRange(
+      data,
+      options.start ?? options.rangeStart,
+      options.end ?? options.rangeEnd
+    );
     const waveformSlice = sliceWaveformData(data, range.start, range.end);
-    const chartPoints = buildChartPoints(waveformSlice.acc, waveformSlice.dt, range.start);
+    const chartPoints = buildChartPoints(
+      waveformSlice.acc,
+      waveformSlice.dt,
+      waveformSlice.meta._analysisWindowStart
+    );
     const canvasId = `${containerId}-canvas`;
+    const dataUrl = AppUtils.sanitizeHttpUrl(data.meta._dataUrl);
+    const plotUrl = AppUtils.sanitizeHttpUrl(data.meta._plotUrl);
+    const sourceLinks = [
+      dataUrl ? `<a href="${escapeHtml(dataUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">ASCII2</a>` : '',
+      plotUrl ? `<a href="${escapeHtml(plotUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">IRISプロット</a>` : '',
+    ].filter(Boolean).join(' ');
 
     container.innerHTML = `
       <div class="waveform-chart-box">
@@ -819,15 +925,15 @@ const WaveformViewer = (() => {
         <span>観測点: ${escapeHtml(data.meta._stationId || '?')}</span>
         <span>点数: ${waveformSlice.meta._npts}</span>
         <span>dt: ${waveformSlice.meta._dt.toFixed(4)} 秒</span>
-        <span>表示範囲: ${range.start.toFixed(1)} - ${range.end.toFixed(1)} 秒</span>
+        <span>表示指定: ${range.start.toFixed(2)} - ${range.end.toFixed(2)} 秒</span>
+        <span>実効サンプル範囲: ${waveformSlice.meta._analysisWindowStart.toFixed(2)} - ${waveformSlice.meta._analysisWindowEnd.toFixed(2)} 秒</span>
         <span>最大加速度: ${waveformSlice.meta._maxAcc.toFixed(2)} ${data.meta._displayUnit || 'gal'}</span>
         <span>フィルタ: ${escapeHtml(data.meta._filterLabel || 'なし')}</span>
       </div>
       <div class="waveform-info">
         <span>${escapeHtml(data.meta._source)} / 返却ヘッダー: ${escapeHtml(data.meta._inputUnitReported || '?')} / 解析単位: ${escapeHtml(data.meta._inputUnit || '?')} / 表示単位: ${escapeHtml(data.meta._displayUnit || 'gal')}</span>
         <span>
-          <a href="${data.meta._dataUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">ASCII2</a>
-          <a href="${data.meta._plotUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">IRISプロット</a>
+          ${sourceLinks}
         </span>
       </div>
     `;
@@ -950,6 +1056,7 @@ const WaveformViewer = (() => {
   function clearCache() {
     waveformDataCache.clear();
     stationPublicInfoCache.clear();
+    stationPublicInfoCacheGeneration += 1;
   }
 
   function calculateDistanceKm(lat1, lon1, lat2, lon2) {
@@ -972,10 +1079,7 @@ const WaveformViewer = (() => {
   }
 
   function escapeHtml(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    return AppUtils.escapeHtml(str);
   }
 
   function getDatacenters() {
@@ -993,6 +1097,9 @@ const WaveformViewer = (() => {
     resetDisplay,
     clearCache,
     sliceWaveformData,
+    normalizeRange,
+    parseWaveformText,
+    channelPriority,
     getWaveformDataURL,
     getWaveformImageURL,
     formatIRISTime,

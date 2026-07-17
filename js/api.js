@@ -42,14 +42,15 @@ const EarthquakeAPI = (() => {
    * @param {Object} params - 検索条件
    * @returns {Promise<Object>} GeoJSON形式のレスポンス
    */
-  async function search(params) {
+  async function search(params, options = {}) {
+    validateSearchParams(params);
     const boundsList = Array.isArray(params.boundsList) && params.boundsList.length > 0
       ? params.boundsList
       : [params];
 
     const responses = await Promise.all(boundsList.map(bounds => {
       const query = buildQuery(params, bounds);
-      return fetchGeoJSON(query);
+      return fetchGeoJSON(query, options);
     }));
 
     if (responses.length === 1) return responses[0];
@@ -59,7 +60,7 @@ const EarthquakeAPI = (() => {
   /**
    * クイック検索（最近の地震）
    */
-  function recentSearch(hours, minMag, limit = 200) {
+  function recentSearch(hours, minMag, limit = 200, options = {}) {
     const now = new Date();
     const start = new Date(now.getTime() - hours * 60 * 60 * 1000);
     return search({
@@ -67,7 +68,7 @@ const EarthquakeAPI = (() => {
       endtime: now.toISOString(),
       minmagnitude: minMag,
       limit: limit,
-    });
+    }, options);
   }
 
   /**
@@ -81,15 +82,16 @@ const EarthquakeAPI = (() => {
     const query = new URLSearchParams({
       format: 'geojson',
       orderby: 'time',
+      eventtype: 'earthquake',
     });
 
-    if (params.starttime) query.set('starttime', params.starttime);
-    if (params.endtime) query.set('endtime', params.endtime);
-    if (params.minmagnitude) query.set('minmagnitude', params.minmagnitude);
-    if (params.maxmagnitude) query.set('maxmagnitude', params.maxmagnitude);
-    if (params.mindepth) query.set('mindepth', params.mindepth);
-    if (params.maxdepth) query.set('maxdepth', params.maxdepth);
-    if (params.limit) query.set('limit', params.limit);
+    if (hasValue(params.starttime)) query.set('starttime', params.starttime);
+    if (hasValue(params.endtime)) query.set('endtime', params.endtime);
+    if (hasValue(params.minmagnitude)) query.set('minmagnitude', params.minmagnitude);
+    if (hasValue(params.maxmagnitude)) query.set('maxmagnitude', params.maxmagnitude);
+    if (hasValue(params.mindepth)) query.set('mindepth', params.mindepth);
+    if (hasValue(params.maxdepth)) query.set('maxdepth', params.maxdepth);
+    if (hasValue(params.limit)) query.set('limit', params.limit);
 
     if (bounds.minlat !== undefined) query.set('minlatitude', bounds.minlat);
     if (bounds.maxlat !== undefined) query.set('maxlatitude', bounds.maxlat);
@@ -99,19 +101,110 @@ const EarthquakeAPI = (() => {
     return query;
   }
 
-  async function fetchGeoJSON(query) {
+  async function fetchGeoJSON(query, options = {}) {
     const url = `${BASE_URL}?${query.toString()}`;
-    const response = await fetch(url);
+    const { response, text } = await AppUtils.fetchTextWithTimeout(url, {
+      signal: options.signal,
+      timeoutMs: options.timeoutMs || 20000,
+      timeoutMessage: 'USGS APIの応答がタイムアウトしました',
+    });
 
     if (!response.ok) {
       if (response.status === 400) {
-        const text = await response.text();
         throw new Error(`検索条件にエラーがあります: ${text}`);
       }
       throw new Error(`APIエラー (HTTP ${response.status})`);
     }
 
-    return response.json();
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      throw new Error('USGS APIの応答をJSONとして解釈できませんでした');
+    }
+  }
+
+  function hasValue(value) {
+    return value !== undefined && value !== null && value !== '';
+  }
+
+  function validateSearchParams(params) {
+    if (!params || typeof params !== 'object' || Array.isArray(params)) {
+      throw new TypeError('検索条件が不正です');
+    }
+
+    const start = parseDateParam(params.starttime, '開始日時');
+    const end = parseDateParam(params.endtime, '終了日時');
+    if (start && end && start > end) {
+      throw new RangeError('開始日は終了日以前にしてください');
+    }
+
+    validateNumberParam(params.minmagnitude, '最小マグニチュード', -10, 10);
+    validateNumberParam(params.maxmagnitude, '最大マグニチュード', -10, 10);
+    validateNumberParam(params.mindepth, '最小深さ', -100, 1000);
+    validateNumberParam(params.maxdepth, '最大深さ', 0, 1000);
+    validateIntegerParam(params.limit, '最大取得件数', 1, 20000);
+
+    if (hasValue(params.minmagnitude) && hasValue(params.maxmagnitude)
+        && Number(params.minmagnitude) > Number(params.maxmagnitude)) {
+      throw new RangeError('最小マグニチュードは最大マグニチュード以下にしてください');
+    }
+    if (hasValue(params.mindepth) && hasValue(params.maxdepth)
+        && Number(params.mindepth) > Number(params.maxdepth)) {
+      throw new RangeError('最小深さは最大深さ以下にしてください');
+    }
+
+    const boundsList = Array.isArray(params.boundsList) ? params.boundsList : null;
+    if (boundsList) {
+      if (boundsList.length === 0) throw new RangeError('地域範囲が空です');
+      boundsList.forEach((bounds, index) => validateBounds(bounds, `地域範囲${index + 1}`));
+    } else {
+      const hasAnyBounds = ['minlat', 'maxlat', 'minlon', 'maxlon'].some(key => hasValue(params[key]));
+      if (params.requireBounds || hasAnyBounds) validateBounds(params, 'カスタム範囲');
+    }
+
+    return true;
+  }
+
+  function parseDateParam(value, label) {
+    if (!hasValue(value)) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) throw new TypeError(`${label}が不正です`);
+    return date;
+  }
+
+  function validateNumberParam(value, label, min, max) {
+    if (!hasValue(value)) return;
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < min || number > max) {
+      throw new RangeError(`${label}は${min}〜${max}の範囲で指定してください`);
+    }
+  }
+
+  function validateIntegerParam(value, label, min, max) {
+    if (!hasValue(value)) return;
+    const number = Number(value);
+    if (!Number.isInteger(number) || number < min || number > max) {
+      throw new RangeError(`${label}は${min}〜${max}の整数で指定してください`);
+    }
+  }
+
+  function validateBounds(bounds, label) {
+    if (!bounds || typeof bounds !== 'object') throw new TypeError(`${label}が不正です`);
+    const keys = ['minlat', 'maxlat', 'minlon', 'maxlon'];
+    if (keys.some(key => !hasValue(bounds[key]))) {
+      throw new RangeError(`${label}は南端・北端・西端・東端をすべて指定してください`);
+    }
+
+    validateNumberParam(bounds.minlat, `${label}の南端緯度`, -90, 90);
+    validateNumberParam(bounds.maxlat, `${label}の北端緯度`, -90, 90);
+    validateNumberParam(bounds.minlon, `${label}の西端経度`, -180, 180);
+    validateNumberParam(bounds.maxlon, `${label}の東端経度`, -180, 180);
+    if (Number(bounds.minlat) > Number(bounds.maxlat)) {
+      throw new RangeError(`${label}の南端緯度は北端緯度以下にしてください`);
+    }
+    if (Number(bounds.minlon) > Number(bounds.maxlon)) {
+      throw new RangeError(`${label}の西端経度は東端経度以下にしてください`);
+    }
   }
 
   function mergeGeoJSONResponses(responses, limit) {
@@ -154,6 +247,9 @@ const EarthquakeAPI = (() => {
     search,
     recentSearch,
     getRegionPresets,
+    validateSearchParams,
+    buildQuery,
+    mergeGeoJSONResponses,
     BASE_URL,
   };
 })();

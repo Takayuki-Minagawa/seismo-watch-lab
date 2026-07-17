@@ -11,7 +11,7 @@ const Settings = (() => {
 
   // ===== ダークモード =====
   function initDarkMode() {
-    const saved = localStorage.getItem(STORAGE_KEY_THEME);
+    const saved = readStorage(STORAGE_KEY_THEME);
     if (saved === 'dark') applyTheme('dark');
 
     const btn = document.getElementById('btn-darkmode');
@@ -29,7 +29,7 @@ const Settings = (() => {
 
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem(STORAGE_KEY_THEME, theme);
+    writeStorage(STORAGE_KEY_THEME, theme);
     updateDarkModeButton();
     if (themeChangeCallback) themeChangeCallback();
   }
@@ -114,7 +114,16 @@ const Settings = (() => {
 
   function getSavedSearches() {
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY_SAVED)) || [];
+      const parsed = JSON.parse(readStorage(STORAGE_KEY_SAVED) || '[]');
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(item => (
+        item
+        && typeof item.name === 'string'
+        && item.name.trim()
+        && item.params
+        && typeof item.params === 'object'
+        && !Array.isArray(item.params)
+      ));
     } catch {
       return [];
     }
@@ -133,7 +142,10 @@ const Settings = (() => {
     } else {
       saved.push({ name, params });
     }
-    localStorage.setItem(STORAGE_KEY_SAVED, JSON.stringify(saved));
+    if (!writeStorage(STORAGE_KEY_SAVED, JSON.stringify(saved))) {
+      showToast('検索条件を保存できませんでした');
+      return;
+    }
     updateSavedSearchList();
   }
 
@@ -143,7 +155,10 @@ const Settings = (() => {
 
     const saved = getSavedSearches();
     const filtered = saved.filter(s => s.name !== sel.value);
-    localStorage.setItem(STORAGE_KEY_SAVED, JSON.stringify(filtered));
+    if (!writeStorage(STORAGE_KEY_SAVED, JSON.stringify(filtered))) {
+      showToast('保存済み条件を削除できませんでした');
+      return;
+    }
     updateSavedSearchList();
   }
 
@@ -221,9 +236,6 @@ const Settings = (() => {
   function initShare() {
     const btn = document.getElementById('btn-share');
     if (btn) btn.addEventListener('click', shareCurrentSearch);
-
-    // ページロード時にURLパラメータを復元
-    restoreFromURL();
   }
 
   function shareCurrentSearch() {
@@ -237,7 +249,7 @@ const Settings = (() => {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(() => {
         showToast('共有URLをクリップボードにコピーしました');
-      });
+      }).catch(() => prompt('以下のURLをコピーしてください:', url));
     } else {
       prompt('以下のURLをコピーしてください:', url);
     }
@@ -284,6 +296,8 @@ const Settings = (() => {
       toast = document.createElement('div');
       toast.id = 'toast';
       toast.className = 'toast';
+      toast.setAttribute('role', 'status');
+      toast.setAttribute('aria-live', 'polite');
       document.body.appendChild(toast);
     }
     toast.textContent = message;
@@ -295,6 +309,23 @@ const Settings = (() => {
     themeChangeCallback = callback;
   }
 
+  function readStorage(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writeStorage(key, value) {
+    try {
+      localStorage.setItem(key, value);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   return {
     initDarkMode,
     initAutoRefresh,
@@ -304,6 +335,7 @@ const Settings = (() => {
     restoreFromURL,
     showToast,
     getCurrentSearchParams,
+    getSavedSearches,
     applySearchParams,
     setActiveQuickType,
     getActiveQuickType,

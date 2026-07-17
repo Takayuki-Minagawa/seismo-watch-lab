@@ -9,16 +9,60 @@ const EarthquakeMap = (() => {
   let currentClickCallback = null;
   let styleMode = 'magnitude';
 
+  const STYLE_DEFINITIONS = Object.freeze({
+    magnitude: {
+      title: 'マグニチュード',
+      hint: 'Mが大きいほど濃色',
+      inclusive: false,
+      unknownColor: '#999999',
+      items: [
+        { max: 3, label: '<3', color: '#48bb78' },
+        { max: 4, label: '3–4', color: '#a0c45a' },
+        { max: 5, label: '4–5', color: '#ecc94b' },
+        { max: 6, label: '5–6', color: '#ed8936' },
+        { max: 7, label: '6–7', color: '#c53030' },
+        { max: 8, label: '7–8', color: '#9b2c2c' },
+        { max: Infinity, label: '8以上', color: '#4a0000' },
+      ],
+    },
+    depth: {
+      title: '震源深さ',
+      hint: '赤:浅い / 青紫:深い',
+      inclusive: false,
+      unknownColor: '#999999',
+      items: [
+        { max: 30, label: '<30 km', color: '#d7263d' },
+        { max: 70, label: '30–70 km', color: '#f46036' },
+        { max: 300, label: '70–300 km', color: '#2e86ab' },
+        { max: Infinity, label: '300 km以上', color: '#4b3f72' },
+      ],
+    },
+    recency: {
+      title: '発生からの経過時間',
+      hint: '赤:1時間以内 / 橙:24時間以内',
+      inclusive: true,
+      unknownColor: '#999999',
+      items: [
+        { max: 1, label: '1時間以内', color: '#d7263d' },
+        { max: 24, label: '24時間以内', color: '#f46036' },
+        { max: 168, label: '7日以内', color: '#2e86ab' },
+        { max: Infinity, label: '7日超', color: '#6b7280' },
+      ],
+    },
+  });
+
+  function scaleColor(mode, value) {
+    const definition = STYLE_DEFINITIONS[mode];
+    if (!definition || !Number.isFinite(value)) return definition?.unknownColor || '#999999';
+    const item = definition.items.find(entry => (
+      definition.inclusive ? value <= entry.max : value < entry.max
+    ));
+    return item?.color || definition.unknownColor;
+  }
+
   // マグニチュードに応じた色
   function magColor(mag) {
-    if (mag === null || mag === undefined) return '#999';
-    if (mag < 3) return '#48bb78';
-    if (mag < 4) return '#ecc94b';
-    if (mag < 5) return '#ed8936';
-    if (mag < 6) return '#e53e3e';
-    if (mag < 7) return '#c53030';
-    if (mag < 8) return '#9b2c2c';
-    return '#4a0000';
+    return scaleColor('magnitude', mag);
   }
 
   // マグニチュードに応じた半径
@@ -34,20 +78,15 @@ const EarthquakeMap = (() => {
   }
 
   function depthColor(depth) {
-    if (depth === null || depth === undefined) return '#999';
-    if (depth < 30) return '#d7263d';
-    if (depth < 70) return '#f46036';
-    if (depth < 300) return '#2e86ab';
-    return '#4b3f72';
+    return scaleColor('depth', depth);
   }
 
   function recencyColor(time) {
-    if (!time) return '#999';
+    if (!Number.isFinite(time)) return STYLE_DEFINITIONS.recency.unknownColor;
     const ageHours = (Date.now() - time) / (60 * 60 * 1000);
-    if (ageHours <= 1) return '#d7263d';
-    if (ageHours <= 24) return '#f46036';
-    if (ageHours <= 168) return '#2e86ab';
-    return '#6b7280';
+    return ageHours < 0
+      ? STYLE_DEFINITIONS.recency.unknownColor
+      : scaleColor('recency', ageHours);
   }
 
   function markerColor(feature) {
@@ -76,6 +115,7 @@ const EarthquakeMap = (() => {
     }).addTo(map);
 
     markerGroup = L.layerGroup().addTo(map);
+    updateModeUi();
 
     return map;
   }
@@ -122,16 +162,21 @@ const EarthquakeMap = (() => {
       // ポップアップ（日本語）
       const place = I18n.translatePlace(props.place);
       const time = I18n.formatDateJST(props.time);
+      const detailUrl = AppUtils.sanitizeUrlForOrigins(props.url, ['https://earthquake.usgs.gov']);
+      const detailLink = detailUrl
+        ? `<div class="popup-link"><a href="${AppUtils.escapeHtml(detailUrl)}" target="_blank" rel="noopener">USGS詳細ページ</a></div>`
+        : '';
+      const depthText = Number.isFinite(depth) ? `${depth.toFixed(1)} km` : '不明';
       const popup = `
         <div class="eq-popup">
-          <strong class="${I18n.magnitudeClass(mag)}">M${mag !== null ? mag.toFixed(1) : '?'}</strong>
-          <span class="popup-label">${I18n.magnitudeLabel(mag)}</span>
+          <strong class="mag-badge ${I18n.magnitudeClass(mag)}">M${mag !== null ? mag.toFixed(1) : '?'}</strong>
+          <span class="popup-label">${AppUtils.escapeHtml(I18n.magnitudeLabel(mag))}</span>
           <hr>
-          <div><strong>震央:</strong> ${place}</div>
-          <div><strong>深さ:</strong> ${depth ? depth.toFixed(1) + ' km' : '不明'}</div>
-          <div><strong>発生日時:</strong> ${time}</div>
-          ${props.tsunami ? '<div class="tsunami-warn">津波情報あり</div>' : ''}
-          <div class="popup-link"><a href="${props.url}" target="_blank" rel="noopener">USGS詳細ページ</a></div>
+          <div><strong>震央:</strong> ${AppUtils.escapeHtml(place)}</div>
+          <div><strong>深さ:</strong> ${depthText}</div>
+          <div><strong>発生日時:</strong> ${AppUtils.escapeHtml(time)}</div>
+          ${props.tsunami ? '<div class="tsunami-warn">USGS津波関連フラグあり（警報ではありません）</div>' : ''}
+          ${detailLink}
         </div>
       `;
       marker.bindPopup(popup);
@@ -179,21 +224,29 @@ const EarthquakeMap = (() => {
 
   function setStyleMode(mode) {
     styleMode = ['magnitude', 'depth', 'recency'].includes(mode) ? mode : 'magnitude';
-    updateModeHint();
+    updateModeUi();
     if (currentGeojson) {
       displayEarthquakes(currentGeojson, currentClickCallback, { fit: false });
     }
   }
 
-  function updateModeHint() {
+  function updateModeUi() {
+    const definition = STYLE_DEFINITIONS[styleMode];
     const hint = document.getElementById('map-mode-hint');
-    if (!hint) return;
-    if (styleMode === 'depth') {
-      hint.textContent = '赤:浅い / 青紫:深い';
-    } else if (styleMode === 'recency') {
-      hint.textContent = '赤:1時間以内 / 橙:24時間以内';
-    } else {
-      hint.textContent = 'Mが大きいほど濃色';
+    if (hint) hint.textContent = definition.hint;
+
+    const legend = document.getElementById('map-legend');
+    if (legend) {
+      const items = [
+        ...definition.items,
+        { label: '不明', color: definition.unknownColor },
+      ];
+      legend.innerHTML = `
+        <span class="legend-title">${AppUtils.escapeHtml(definition.title)}:</span>
+        ${items.map(item => `
+          <span class="legend-item"><span class="legend-dot" style="background:${item.color}" aria-hidden="true"></span> ${AppUtils.escapeHtml(item.label)}</span>
+        `).join('')}
+      `;
     }
   }
 

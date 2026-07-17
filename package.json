@@ -1,0 +1,13 @@
+{
+  "name": "seismo-watch-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "USGS and FDSN earthquake data viewer",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node scripts/check-syntax.mjs && node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

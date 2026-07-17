@@ -41,7 +41,7 @@
   </header>
 
   <!-- ========== ローディング ========== -->
-  <div id="loading" class="loading-overlay">
+  <div id="loading" class="loading-overlay" role="status" aria-live="polite" aria-hidden="true">
     <div class="loading-box">
       <div class="spinner"></div>
       <div>地震データを取得中...</div>
@@ -49,11 +49,12 @@
   </div>
 
   <!-- ========== 詳細パネル（スライドイン） ========== -->
-  <div id="detail-overlay" class="detail-overlay"></div>
-  <aside id="detail-panel" class="detail-panel">
+  <div id="detail-overlay" class="detail-overlay" aria-hidden="true"></div>
+  <aside id="detail-panel" class="detail-panel" role="dialog" aria-modal="true"
+    aria-labelledby="detail-title" aria-hidden="true" tabindex="-1" inert>
     <div class="detail-panel-header">
-      <h2>地震詳細情報</h2>
-      <button id="detail-close" class="detail-close">&#x2715;</button>
+      <h2 id="detail-title">地震詳細情報</h2>
+      <button id="detail-close" class="detail-close" type="button" aria-label="地震詳細を閉じる">&#x2715;</button>
     </div>
     <div id="detail-content"></div>
   </aside>
@@ -175,7 +176,7 @@
             <div id="monitor-hotspots" class="monitor-list empty">--</div>
           </div>
           <div class="monitor-box">
-            <h3>要注意イベント</h3>
+            <h3>要確認イベント（検索結果内）</h3>
             <div id="monitor-watchlist" class="monitor-list empty">--</div>
           </div>
         </div>
@@ -196,23 +197,14 @@
           <span id="map-mode-hint" class="map-mode-hint" aria-live="polite">Mが大きいほど濃色</span>
         </div>
       </div>
-      <div class="legend">
-        <span class="legend-title">マグニチュード:</span>
-        <span class="legend-item"><span class="legend-dot" style="background:#48bb78"></span> &lt;3</span>
-        <span class="legend-item"><span class="legend-dot" style="background:#a0c45a"></span> 3-4</span>
-        <span class="legend-item"><span class="legend-dot" style="background:#ecc94b"></span> 4-5</span>
-        <span class="legend-item"><span class="legend-dot" style="background:#ed8936"></span> 5-6</span>
-        <span class="legend-item"><span class="legend-dot" style="background:#e53e3e"></span> 6-7</span>
-        <span class="legend-item"><span class="legend-dot" style="background:#9b2c2c"></span> 7-8</span>
-        <span class="legend-item"><span class="legend-dot" style="background:#4a0000"></span> 8+</span>
-      </div>
+      <div class="legend" id="map-legend" aria-live="polite"></div>
       <div id="map" class="map-container"></div>
     </section>
 
     <!-- 結果テーブルセクション -->
     <section class="card" id="results-section">
       <div class="results-bar">
-        <span class="results-count" id="results-count">検索結果: --</span>
+        <span class="results-count" id="results-count" aria-live="polite">検索結果: --</span>
         <div class="download-buttons">
           <button class="btn btn-sm btn-outline" id="btn-csv" disabled>CSV</button>
           <button class="btn btn-sm btn-outline" id="btn-json" disabled>JSON</button>
@@ -224,11 +216,11 @@
         <table class="eq-table" id="eq-table">
           <thead>
             <tr>
-              <th data-sort="time" class="col-time sorted">発生日時 (JST) <span class="sort-icon">&#9660;</span></th>
-              <th data-sort="mag" class="col-mag">M <span class="sort-icon">&#9650;&#9660;</span></th>
-              <th data-sort="depth" class="col-depth">深さ (km) <span class="sort-icon">&#9650;&#9660;</span></th>
-              <th data-sort="place" class="col-place">震央 <span class="sort-icon">&#9650;&#9660;</span></th>
-              <th>津波</th>
+              <th data-sort="time" class="col-time sorted" aria-sort="descending"><button type="button" class="sort-button">発生日時 (JST) <span class="sort-icon" aria-hidden="true">&#9660;</span></button></th>
+              <th data-sort="mag" class="col-mag" aria-sort="none"><button type="button" class="sort-button">M <span class="sort-icon" aria-hidden="true">&#9650;&#9660;</span></button></th>
+              <th data-sort="depth" class="col-depth" aria-sort="none"><button type="button" class="sort-button">深さ (km) <span class="sort-icon" aria-hidden="true">&#9650;&#9660;</span></button></th>
+              <th data-sort="place" class="col-place" aria-sort="none"><button type="button" class="sort-button">震央 <span class="sort-icon" aria-hidden="true">&#9650;&#9660;</span></button></th>
+              <th>津波関連</th>
               <th>状態</th>
               <th>詳細</th>
             </tr>
@@ -259,14 +251,14 @@
 
     <!-- ========== 分析ツールセクション ========== -->
     <section class="card" id="analysis-section">
-      <div class="tab-bar">
-        <button class="tab-btn active" data-tab="stats">統計グラフ</button>
-        <button class="tab-btn" data-tab="waveform">波形ビューア</button>
-        <button class="tab-btn" data-tab="spectrum">応答スペクトル</button>
+      <div class="tab-bar" role="tablist" aria-label="分析ツール">
+        <button id="tab-btn-stats" class="tab-btn active" data-tab="stats" role="tab" aria-selected="true" aria-controls="tab-stats">統計グラフ</button>
+        <button id="tab-btn-waveform" class="tab-btn" data-tab="waveform" role="tab" aria-selected="false" aria-controls="tab-waveform" tabindex="-1">波形ビューア</button>
+        <button id="tab-btn-spectrum" class="tab-btn" data-tab="spectrum" role="tab" aria-selected="false" aria-controls="tab-spectrum" tabindex="-1">応答スペクトル</button>
       </div>
 
       <!-- 統計グラフタブ -->
-      <div class="tab-content" id="tab-stats">
+      <div class="tab-content" id="tab-stats" role="tabpanel" aria-labelledby="tab-btn-stats">
         <div class="chart-grid">
           <div class="chart-box"><canvas id="chart-mag"></canvas></div>
           <div class="chart-box"><canvas id="chart-depth"></canvas></div>
@@ -279,7 +271,7 @@
       </div>
 
       <!-- 波形ビューアタブ -->
-      <div class="tab-content hidden" id="tab-waveform">
+      <div class="tab-content hidden" id="tab-waveform" role="tabpanel" aria-labelledby="tab-btn-waveform" aria-hidden="true">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
           複数のFDSNデータセンター（IRIS、GEOFON、GeoNet等）から観測点を検索し、IRIS (EarthScope) のデータサービスで計器補正済み加速度波形を取得します。
           既定の生ダウンロード値は COUNTS のため、このビューアでは <code>correct=true&amp;units=ACC</code> を指定して物理単位へ変換した波形を利用します。
@@ -288,7 +280,7 @@
         </p>
         <div class="waveform-controls">
           <div class="form-group">
-            <label>選択中の地震</label>
+            <label for="waveform-eq-label">選択中の地震</label>
             <input type="text" id="waveform-eq-label" readonly placeholder="テーブルから地震を選択" style="min-width:250px;">
           </div>
           <div class="form-group">
@@ -369,7 +361,7 @@
       </div>
 
       <!-- 応答スペクトルタブ -->
-      <div class="tab-content hidden" id="tab-spectrum">
+      <div class="tab-content hidden" id="tab-spectrum" role="tabpanel" aria-labelledby="tab-btn-spectrum" aria-hidden="true">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
           検索結果から地震を選択し、波形ビューアで取得した IRIS 計器補正済み加速度波形から応答スペクトルを計算します。
           この画面でのファイル読込は行いません。
@@ -391,12 +383,17 @@
             <label>&nbsp;</label>
             <button class="btn btn-primary btn-sm" id="btn-calc-spectrum" disabled>計算</button>
           </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button class="btn btn-outline btn-sm" id="btn-download-spectrum" disabled>スペクトルCSV</button>
+          </div>
         </div>
         <div class="spectrum-chart-area">
           <div class="spectrum-chart-box"><canvas id="chart-waveform-input"></canvas></div>
           <div class="spectrum-chart-box"><canvas id="chart-spectrum"></canvas></div>
         </div>
         <div class="spectrum-info" id="spectrum-info" style="display:none;"></div>
+        <div class="spectrum-summary" id="spectrum-summary" role="status" aria-live="polite"></div>
       </div>
     </section>
 
@@ -537,6 +534,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 
   <!-- アプリモジュール -->
+  <script src="js/utils.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
   <script src="js/map.js"></script>

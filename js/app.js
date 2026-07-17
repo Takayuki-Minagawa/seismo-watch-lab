@@ -15,10 +15,15 @@
   let lastSearchType = 'manual';  // 'manual' | 'quick'
   let lastQuickType = null;       // '24h-4.5' 等
   let spectrumInputData = null;
+  let currentSpectrumResult = null;
+  let spectrumCalculationSeq = 0;
   let currentWaveformData = null;
   let currentWaveformView = { start: 0, end: null };
-  let waveformStationInfoRequestSeq = 0;
   const PAGE_SIZE = 50;
+  const searchRequests = AppUtils.createRequestCoordinator();
+  const stationSearchRequests = AppUtils.createRequestCoordinator();
+  const waveformRequests = AppUtils.createRequestCoordinator();
+  const stationInfoRequests = AppUtils.createRequestCoordinator();
 
   // --- DOM要素 ---
   const $ = (sel) => document.querySelector(sel);
@@ -101,7 +106,7 @@
 
     // テーブルヘッダーソート
     $$('.eq-table thead th[data-sort]').forEach(th => {
-      th.addEventListener('click', () => onSortClick(th.dataset.sort));
+      th.querySelector('.sort-button')?.addEventListener('click', () => onSortClick(th.dataset.sort));
     });
 
     // ページネーション
@@ -139,20 +144,15 @@
     const params = buildSearchParams();
     if (!params) return;
 
-    showLoading(true);
-    clearError();
-
-    try {
-      const data = await EarthquakeAPI.search(params);
-      lastSearchType = 'manual';
-      lastQuickType = null;
-      Settings.setActiveQuickType(null);
-      handleResults(data);
-    } catch (err) {
-      showError(err.message);
-    } finally {
-      showLoading(false);
-    }
+    await runSearch(
+      signal => EarthquakeAPI.search(params, { signal }),
+      data => {
+        lastSearchType = 'manual';
+        lastQuickType = null;
+        Settings.setActiveQuickType(null);
+        handleResults(data);
+      }
+    );
   }
 
   // --- クイック検索 ---
@@ -168,19 +168,31 @@
     const preset = quickPresets[type];
     if (!preset) return;
 
+    await runSearch(
+      signal => EarthquakeAPI.recentSearch(preset.hours, preset.minMag, preset.limit, { signal }),
+      data => {
+        lastSearchType = 'quick';
+        lastQuickType = type;
+        Settings.setActiveQuickType(type);
+        handleResults(data);
+      }
+    );
+  }
+
+  async function runSearch(fetchData, onSuccess) {
+    const request = searchRequests.begin();
     showLoading(true);
     clearError();
 
     try {
-      const data = await EarthquakeAPI.recentSearch(preset.hours, preset.minMag, preset.limit);
-      lastSearchType = 'quick';
-      lastQuickType = type;
-      Settings.setActiveQuickType(type);
-      handleResults(data);
+      const data = await fetchData(request.signal);
+      if (!request.isCurrent()) return;
+      onSuccess(data);
     } catch (err) {
-      showError(err.message);
+      if (request.isCurrent() && !AppUtils.isAbortError(err)) showError(err.message);
     } finally {
-      showLoading(false);
+      if (request.isCurrent()) showLoading(false);
+      searchRequests.finish(request.id);
     }
   }
 
@@ -190,7 +202,7 @@
 
     if (els.startdate.value) params.starttime = els.startdate.value;
     if (els.enddate.value) {
-      const end = new Date(els.enddate.value);
+      const end = new Date(`${els.enddate.value}T00:00:00`);
       end.setDate(end.getDate() + 1);
       params.endtime = formatDateInput(end);
     }
@@ -200,14 +212,11 @@
 
     const regionKey = els.region.value;
     if (regionKey === 'custom') {
-      const minlat = $('#custom-minlat').value;
-      const maxlat = $('#custom-maxlat').value;
-      const minlon = $('#custom-minlon').value;
-      const maxlon = $('#custom-maxlon').value;
-      if (minlat) params.minlat = minlat;
-      if (maxlat) params.maxlat = maxlat;
-      if (minlon) params.minlon = minlon;
-      if (maxlon) params.maxlon = maxlon;
+      params.requireBounds = true;
+      params.minlat = $('#custom-minlat').value;
+      params.maxlat = $('#custom-maxlat').value;
+      params.minlon = $('#custom-minlon').value;
+      params.maxlon = $('#custom-maxlon').value;
     } else if (regionKey !== 'global') {
       const presets = EarthquakeAPI.getRegionPresets();
       const preset = presets[regionKey];
@@ -297,15 +306,20 @@
       const time = I18n.formatDateJST(p.time);
       const status = I18n.translateTerm(p.status) || p.status;
       const globalIdx = currentData.features.indexOf(feature);
+      const detailUrl = AppUtils.sanitizeUrlForOrigins(p.url, ['https://earthquake.usgs.gov']);
+      const detailLink = detailUrl
+        ? `<a href="${escapeHtml(detailUrl)}" target="_blank" rel="noopener" data-stop-row-click="true">USGS</a>`
+        : '-';
 
-      html += `<tr data-index="${globalIdx}" data-lat="${c[1]}" data-lon="${c[0]}">
-        <td class="col-time">${time}</td>
+      const detailButtonLabel = `M${mag ?? '?'} ${place}の詳細を表示`;
+      html += `<tr data-index="${globalIdx}" data-lat="${escapeHtml(c[1])}" data-lon="${escapeHtml(c[0])}">
+        <td class="col-time">${escapeHtml(time)}</td>
         <td class="col-mag"><span class="mag-badge ${magClass}">${mag !== null ? mag.toFixed(1) : '?'}</span></td>
         <td class="col-depth">${depth !== null ? depth.toFixed(1) : '-'}</td>
         <td class="col-place" title="${escapeHtml(p.place)}">${escapeHtml(place)}</td>
-        <td>${p.tsunami ? '<span class="tsunami-icon">&#x1F30A; あり</span>' : '-'}</td>
+        <td>${p.tsunami ? '<span class="tsunami-icon" title="USGS津波関連フラグ。津波警報を意味しません">関連あり</span>' : '-'}</td>
         <td>${escapeHtml(status)}</td>
-        <td><a href="${p.url}" target="_blank" rel="noopener" data-stop-row-click="true">USGS</a></td>
+        <td class="row-actions"><button type="button" class="btn btn-sm btn-secondary" data-open-row-detail aria-label="${escapeHtml(detailButtonLabel)}">表示</button>${detailLink}</td>
       </tr>`;
     });
 
@@ -319,7 +333,7 @@
 
     // 行クリック: 詳細パネル表示 + 地図フォーカス + 波形ビューア連携
     els.tbody.querySelectorAll('tr[data-lat]').forEach(tr => {
-      tr.addEventListener('click', () => {
+      const openRow = () => {
         const idx = parseInt(tr.dataset.index, 10);
         const feature = currentData.features[idx];
         const lat = parseFloat(tr.dataset.lat);
@@ -337,6 +351,11 @@
 
         // 波形ビューア用に選択地震を記憶
         selectFeatureForWaveform(feature);
+      };
+      tr.addEventListener('click', openRow);
+      tr.querySelector('[data-open-row-detail]')?.addEventListener('click', event => {
+        event.stopPropagation();
+        openRow();
       });
     });
 
@@ -401,6 +420,7 @@
     $$('.eq-table thead th[data-sort]').forEach(th => {
       const isActive = th.dataset.sort === currentSort.key;
       th.classList.toggle('sorted', isActive);
+      th.setAttribute('aria-sort', isActive ? (currentSort.asc ? 'ascending' : 'descending') : 'none');
       const icon = th.querySelector('.sort-icon');
       if (icon) {
         if (isActive) {
@@ -460,26 +480,61 @@
 
   // ===== 分析タブ =====
   function initTabs() {
-    $$('.tab-bar .tab-btn').forEach(btn => {
+    const tabs = Array.from($$('.tab-bar .tab-btn'));
+    tabs.forEach((btn, index) => {
       btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+      btn.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        let nextIndex = index;
+        if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = tabs.length - 1;
+        tabs[nextIndex].focus();
+        activateTab(tabs[nextIndex].dataset.tab);
+      });
     });
   }
 
-  function activateTab(target) {
+  function activateTab(target, { moveFocus = false } = {}) {
+    let activeTab = null;
     $$('.tab-bar .tab-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === target);
+      const isActive = btn.dataset.tab === target;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', String(isActive));
+      btn.tabIndex = isActive ? 0 : -1;
+      if (isActive) activeTab = btn;
     });
 
     $$('#analysis-section .tab-content').forEach(tc => {
-      tc.classList.toggle('hidden', tc.id !== `tab-${target}`);
+      const isActive = tc.id === `tab-${target}`;
+      tc.classList.toggle('hidden', !isActive);
+      tc.setAttribute('aria-hidden', String(!isActive));
     });
+    if (moveFocus) activeTab?.focus();
   }
 
   // ===== 応答スペクトルツール =====
   function initSpectrumTool() {
     const btnCalc = $('#btn-calc-spectrum');
+    const btnDownload = $('#btn-download-spectrum');
+    const typeSelect = $('#spectrum-type');
     resetSpectrumState();
     btnCalc.addEventListener('click', calculateSpectrumForLoadedData);
+    btnDownload?.addEventListener('click', () => {
+      if (!currentSpectrumResult) return;
+      Download.asSpectrumCSV(
+        currentSpectrumResult,
+        typeSelect.value,
+        generateFilename('spectrum.csv')
+      );
+    });
+    typeSelect?.addEventListener('change', () => {
+      if (!currentSpectrumResult) return;
+      Spectrum.renderSpectrum(currentSpectrumResult, 'chart-spectrum', typeSelect.value);
+      renderSpectrumSummary(currentSpectrumResult, typeSelect.value);
+    });
   }
 
   // ===== 波形ビューア =====
@@ -491,10 +546,15 @@
     const btnSpectrum = $('#btn-waveform-spectrum');
     const stationSel = $('#waveform-station');
     const filterSel = $('#waveform-filter');
+    const datacenterSel = $('#waveform-datacenter');
+    const radiusSel = $('#waveform-radius');
 
     resetWaveformViewerState();
 
-    stationSel.addEventListener('change', handleWaveformStationSelectionChange);
+    stationSel.addEventListener('change', onWaveformStationSelectionChange);
+    filterSel.addEventListener('change', () => handleStationSearchCriteriaChange('フィルタ'));
+    datacenterSel.addEventListener('change', () => handleStationSearchCriteriaChange('データセンター'));
+    radiusSel.addEventListener('change', () => handleStationSearchCriteriaChange('検索半径'));
 
     btnSearch.addEventListener('click', async () => {
       if (!selectedFeature) {
@@ -503,12 +563,25 @@
       }
 
       const coords = selectedFeature.geometry.coordinates;
-      const radius = parseFloat($('#waveform-radius').value);
-      const datacenter = $('#waveform-datacenter').value;
+      const radiusValue = radiusSel.value;
+      const radius = parseFloat(radiusValue);
+      const datacenter = datacenterSel.value;
+      const filterPreset = filterSel.value;
       const timeWindow = WaveformViewer.getTimeWindow(selectedFeature);
 
+      invalidateLoadedWaveform();
+      stationInfoRequests.cancel();
+      resetWaveformStationDetail();
+      stationSel.innerHTML = '<option value="">-- 観測点を検索中 --</option>';
+      btnShow.disabled = true;
+      const stationSummary = $('#waveform-station-summary');
+      if (stationSummary) {
+        stationSummary.innerHTML = '<p class="station-summary-message">観測点と波形取得可否を確認中です...</p>';
+        stationSummary.classList.remove('hidden');
+      }
       btnSearch.disabled = true;
       btnSearch.textContent = '検索・確認中...';
+      const request = stationSearchRequests.begin();
 
       try {
         const result = await WaveformViewer.searchStations(
@@ -520,33 +593,56 @@
             requireWaveform: true,
             starttime: timeWindow.starttime,
             endtime: timeWindow.endtime,
-            filterPreset: filterSel.value,
+            filterPreset,
             datacenter: datacenter,
+            signal: request.signal,
           }
         );
+        if (
+          !request.isCurrent()
+          || filterSel.value !== filterPreset
+          || datacenterSel.value !== datacenter
+          || radiusSel.value !== radiusValue
+        ) return;
         const dcLabel = (WaveformViewer.getDatacenters()[datacenter] || {}).label || datacenter;
         WaveformViewer.populateStationSelect(result.stations, 'waveform-station');
-        renderWaveformStationSummary(result.stations, result.candidateCount, result.availableCount, dcLabel);
+        renderWaveformStationSummary(
+          result.stations,
+          result.candidateCount,
+          result.checkedCount,
+          result.availableCount,
+          dcLabel
+        );
 
         if (result.stations.length > 0 && stationSel.options.length > 1) {
           stationSel.selectedIndex = 1;
-          handleWaveformStationSelectionChange();
+          onWaveformStationSelectionChange();
         }
 
         if (result.candidateCount === 0) {
           Settings.showToast(`${dcLabel}: 周辺に観測点が見つかりませんでした。検索半径やデータセンターを変更してください。`);
         } else if (result.availableCount === 0) {
-          Settings.showToast(`${dcLabel}: 候補 ${result.candidateCount} チャンネルを確認しましたが、IRIS経由で波形取得可能な観測点はありませんでした`);
-        } else if (result.availableCount !== result.candidateCount) {
-          Settings.showToast(`${dcLabel}: ${result.candidateCount} チャンネル中 ${result.availableCount} チャンネルがIRIS経由で波形取得可能`);
+          Settings.showToast(`${dcLabel}: 候補 ${result.candidateCount} 件中、近傍 ${result.checkedCount} チャンネルを確認しましたが波形を取得できませんでした`);
+        } else if (result.availableCount !== result.checkedCount) {
+          Settings.showToast(`${dcLabel}: 近傍 ${result.checkedCount} チャンネル中 ${result.availableCount} チャンネルがIRIS経由で波形取得可能`);
         } else {
           Settings.showToast(`${dcLabel}: ${result.availableCount} チャンネルが見つかりました`);
         }
       } catch (err) {
-        Settings.showToast(`観測点検索エラー: ${err.message}`);
+        if (request.isCurrent() && !AppUtils.isAbortError(err)) {
+          stationSel.innerHTML = '<option value="">-- 観測点を再検索してください --</option>';
+          btnShow.disabled = true;
+          if (stationSummary) {
+            stationSummary.innerHTML = '<p class="station-summary-message">観測点を取得できませんでした。条件を確認して再検索してください。</p>';
+          }
+          Settings.showToast(`観測点検索エラー: ${err.message}`);
+        }
       } finally {
-        btnSearch.disabled = false;
-        btnSearch.textContent = '観測点を検索';
+        if (request.isCurrent()) {
+          btnSearch.disabled = false;
+          btnSearch.textContent = '観測点を検索';
+        }
+        stationSearchRequests.finish(request.id);
       }
     });
 
@@ -562,17 +658,27 @@
 
       const station = JSON.parse(stationSel.value);
       const timeWindow = WaveformViewer.getTimeWindow(selectedFeature);
+      const requestedStationKey = station.stationKey;
+      const requestedFilter = filterSel.value;
       btnShow.disabled = true;
       btnShow.textContent = '取得中...';
+      const request = waveformRequests.begin();
 
       try {
-        currentWaveformData = await WaveformViewer.displayWaveform(
+        const waveformData = await WaveformViewer.fetchWaveformData(
           station,
           timeWindow.starttime,
           timeWindow.endtime,
-          'waveform-display',
-          { filterPreset: filterSel.value }
+          { filterPreset: requestedFilter, signal: request.signal }
         );
+        const activeStation = getSelectedWaveformStation();
+        if (
+          !request.isCurrent()
+          || activeStation?.stationKey !== requestedStationKey
+          || filterSel.value !== requestedFilter
+        ) return;
+        currentWaveformData = waveformData;
+        WaveformViewer.renderWaveform(currentWaveformData, 'waveform-display');
         currentWaveformView = {
           start: 0,
           end: currentWaveformData.meta._duration,
@@ -582,14 +688,18 @@
         syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
         Settings.showToast('IRIS 計器補正済み波形を取得しました');
       } catch (err) {
+        if (!request.isCurrent() || AppUtils.isAbortError(err)) return;
         currentWaveformData = null;
         currentWaveformView = { start: 0, end: null };
         setWaveformViewControlsEnabled(false);
         WaveformViewer.resetDisplay('waveform-display');
         Settings.showToast(`波形取得エラー: ${err.message}`);
       } finally {
-        btnShow.disabled = false;
-        btnShow.textContent = '波形を表示';
+        if (request.isCurrent()) {
+          btnShow.disabled = false;
+          btnShow.textContent = '波形を表示';
+        }
+        waveformRequests.finish(request.id);
       }
     });
 
@@ -626,22 +736,31 @@
       }
 
       syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
-      activateTab('spectrum');
+      activateTab('spectrum', { moveFocus: true });
       calculateSpectrumForLoadedData();
     });
   }
 
-  function setSpectrumInput(data, sourceLabel = '') {
+  function setSpectrumInput(data, sourceLabel = '', displayData = data) {
     spectrumInputData = data;
-    Spectrum.renderWaveform(data.acc, data.dt, 'chart-waveform-input');
+    currentSpectrumResult = null;
+    spectrumCalculationSeq += 1;
+    Spectrum.renderWaveform(displayData.acc, displayData.dt, 'chart-waveform-input');
 
     const btnCalc = $('#btn-calc-spectrum');
-    if (btnCalc) btnCalc.disabled = false;
+    if (btnCalc) btnCalc.disabled = Boolean(data.meta?._hasTimingGap);
+    const btnDownload = $('#btn-download-spectrum');
+    if (btnDownload) btnDownload.disabled = true;
+    const summary = $('#spectrum-summary');
+    if (summary) summary.innerHTML = '';
 
     const info = $('#spectrum-info');
     if (info) {
       info.style.display = '';
       info.innerHTML = buildSpectrumInfoHtml(data.meta, sourceLabel);
+      if (data.meta?._hasTimingGap) {
+        info.innerHTML += '<div class="spectrum-warning">欠測または不連続な時刻を検出したため、応答スペクトル計算を停止しました。</div>';
+      }
     }
   }
 
@@ -660,6 +779,9 @@
     if (Number.isFinite(meta._analysisWindowStart) && Number.isFinite(meta._analysisWindowEnd)) {
       parts.push(`解析区間: ${meta._analysisWindowStart.toFixed(1)} - ${meta._analysisWindowEnd.toFixed(1)} 秒`);
     }
+    if (Number.isFinite(meta._sourceNpts) && meta._sourceNpts !== meta._npts) {
+      parts.push(`状態積分: 元波形 ${meta._sourceNpts} 点の先頭から実施`);
+    }
 
     return parts.join(' / ');
   }
@@ -669,43 +791,103 @@
       Settings.showToast('先に検索結果から地震を選び、波形ビューアで波形を表示してください');
       return;
     }
-
-    const dampingStr = $('#spectrum-damping').value;
-    const dampings = dampingStr.split(',').map(s => parseFloat(s.trim()) / 100).filter(d => !isNaN(d) && d > 0);
-    if (dampings.length === 0) {
-      Settings.showToast('減衰定数を正しく入力してください');
+    if (spectrumInputData.meta?._hasTimingGap) {
+      Settings.showToast('波形に欠測または時刻の不連続があるため計算できません');
       return;
     }
 
+    const dampingStr = $('#spectrum-damping').value;
+    const dampingTokens = dampingStr.split(',').map(value => value.trim()).filter(Boolean);
+    const parsedDampings = dampingTokens.map(value => Number(value) / 100);
+    if (
+      dampingTokens.length === 0
+      || dampingTokens.length > 10
+      || parsedDampings.some(value => !Number.isFinite(value) || value < 0 || value >= 1)
+    ) {
+      Settings.showToast('減衰定数は0以上100未満を、最大10個まで指定してください');
+      return;
+    }
+    const dampings = [...new Set(parsedDampings)];
+    const inputData = spectrumInputData;
+
     Settings.showToast('応答スペクトルを計算中...');
+    const calculationSeq = ++spectrumCalculationSeq;
+    const btnCalc = $('#btn-calc-spectrum');
+    if (btnCalc) btnCalc.disabled = true;
 
     setTimeout(() => {
       try {
-        const result = Spectrum.computeSpectrum(spectrumInputData.acc, spectrumInputData.dt, {
+        const result = Spectrum.computeSpectrum(inputData.acc, inputData.dt, {
           hList: dampings,
           periodMin: 0.02,
           periodMax: 10.0,
           periodCount: 100,
+          samplesPerPeriod: 10,
+          evaluationStart: inputData.meta?._analysisWindowStart,
+          evaluationEnd: inputData.meta?._analysisWindowEnd,
         });
+        if (calculationSeq !== spectrumCalculationSeq) return;
 
         const type = $('#spectrum-type').value;
+        currentSpectrumResult = result;
         Spectrum.renderSpectrum(result, 'chart-spectrum', type);
+        renderSpectrumSummary(result, type);
+        const btnDownload = $('#btn-download-spectrum');
+        if (btnDownload) btnDownload.disabled = false;
         Settings.showToast('応答スペクトルの計算が完了しました');
       } catch (err) {
-        Settings.showToast(`計算エラー: ${err.message}`);
+        if (calculationSeq === spectrumCalculationSeq) Settings.showToast(`計算エラー: ${err.message}`);
+      } finally {
+        if (calculationSeq === spectrumCalculationSeq && btnCalc) btnCalc.disabled = false;
       }
     }, 50);
+  }
+
+  function renderSpectrumSummary(result, type) {
+    const container = $('#spectrum-summary');
+    if (!container) return;
+    const typeLabels = { sa: 'Sa (gal)', sv: 'Sv (cm/s)', sd: 'Sd (cm)' };
+    const peaks = Object.entries(result.results).map(([damping, values]) => {
+      let peakValue = -Infinity;
+      let peakIndex = 0;
+      values[type].forEach((value, index) => {
+        if (Number.isFinite(value) && value > peakValue) {
+          peakValue = value;
+          peakIndex = index;
+        }
+      });
+      return `<li>h=${(Number(damping) * 100).toFixed(1)}%: 最大 ${typeLabels[type]} ${peakValue.toFixed(3)} / T=${result.periods[peakIndex].toFixed(3)}秒</li>`;
+    }).join('');
+    const samplingNote = result.meta.periodMinAdjusted
+      ? `入力刻み Δt=${result.meta.dt.toFixed(4)}秒に対して1周期10点を確保するため、最短周期を ${result.meta.requestedPeriodMin.toFixed(3)}秒から ${result.meta.effectivePeriodMin.toFixed(3)}秒へ調整しました。`
+      : `有効周期範囲は ${result.meta.effectivePeriodMin.toFixed(3)}〜${result.meta.periodMax.toFixed(3)}秒です。`;
+
+    container.innerHTML = `
+      <strong>計算結果要約</strong>
+      <span>PGA: ${result.meta.pga.toFixed(3)} gal / 評価区間: ${result.meta.evaluationStart.toFixed(2)}〜${result.meta.evaluationEnd.toFixed(2)}秒</span>
+      <ul>${peaks}</ul>
+      <span>${samplingNote}</span>
+    `;
   }
 
   function syncWaveformToSpectrum(sourceLabel = 'IRIS 計器補正済み加速度波形') {
     if (!currentWaveformData) return null;
 
-    const spectrumData = WaveformViewer.sliceWaveformData(
+    const displayData = WaveformViewer.sliceWaveformData(
       currentWaveformData,
       currentWaveformView.start,
       currentWaveformView.end
     );
-    setSpectrumInput(spectrumData, sourceLabel);
+    const spectrumData = {
+      acc: currentWaveformData.acc,
+      dt: currentWaveformData.dt,
+      meta: {
+        ...displayData.meta,
+        _sourceNpts: currentWaveformData.meta._npts,
+        _sourceDuration: currentWaveformData.meta._duration,
+      },
+    };
+    setSpectrumInput(spectrumData, sourceLabel, displayData);
     return spectrumData;
   }
 
@@ -756,14 +938,24 @@
   }
 
   function resetWaveformViewerState() {
-    currentWaveformData = null;
-    currentWaveformView = { start: 0, end: null };
-    waveformStationInfoRequestSeq += 1;
+    stationSearchRequests.cancel();
+    stationInfoRequests.cancel();
     WaveformViewer.clearCache();
 
     const stationSel = $('#waveform-station');
     if (stationSel) {
       stationSel.innerHTML = '<option value="">-- 先に観測点を検索 --</option>';
+    }
+
+    const btnSearch = $('#btn-search-stations');
+    if (btnSearch) {
+      btnSearch.disabled = false;
+      btnSearch.textContent = '観測点を検索';
+    }
+    const btnShow = $('#btn-show-waveform');
+    if (btnShow) {
+      btnShow.disabled = false;
+      btnShow.textContent = '波形を表示';
     }
 
     const stationSummary = $('#waveform-station-summary');
@@ -774,18 +966,61 @@
 
     resetWaveformStationDetail();
 
+    invalidateLoadedWaveform();
+  }
+
+  function invalidateLoadedWaveform() {
+    waveformRequests.cancel();
+    currentWaveformData = null;
+    currentWaveformView = { start: 0, end: null };
     updateWaveformViewInputs(0, 0);
     setWaveformViewControlsEnabled(false);
     WaveformViewer.resetDisplay('waveform-display');
     resetSpectrumState();
+
+    const btnShow = $('#btn-show-waveform');
+    if (btnShow) {
+      btnShow.disabled = !getSelectedWaveformStation();
+      btnShow.textContent = '波形を表示';
+    }
+  }
+
+  function handleStationSearchCriteriaChange(criteriaLabel) {
+    stationSearchRequests.cancel();
+    stationInfoRequests.cancel();
+    invalidateLoadedWaveform();
+
+    const stationSel = $('#waveform-station');
+    if (stationSel) {
+      stationSel.innerHTML = '<option value="">-- 条件変更後は再検索 --</option>';
+    }
+    const btnSearch = $('#btn-search-stations');
+    if (btnSearch) {
+      btnSearch.disabled = false;
+      btnSearch.textContent = '観測点を検索';
+    }
+    const btnShow = $('#btn-show-waveform');
+    if (btnShow) btnShow.disabled = true;
+    const stationSummary = $('#waveform-station-summary');
+    if (stationSummary) {
+      stationSummary.innerHTML = `<p class="station-summary-message">${escapeHtml(criteriaLabel)}を変更したため、観測点を再検索してください。</p>`;
+      stationSummary.classList.remove('hidden');
+    }
+    resetWaveformStationDetail();
   }
 
   function resetSpectrumState() {
     spectrumInputData = null;
+    currentSpectrumResult = null;
+    spectrumCalculationSeq += 1;
     Spectrum.clearCharts();
 
     const btnCalc = $('#btn-calc-spectrum');
     if (btnCalc) btnCalc.disabled = true;
+    const btnDownload = $('#btn-download-spectrum');
+    if (btnDownload) btnDownload.disabled = true;
+    const summary = $('#spectrum-summary');
+    if (summary) summary.innerHTML = '';
 
     const info = $('#spectrum-info');
     if (info) {
@@ -794,13 +1029,19 @@
     }
   }
 
-  function renderWaveformStationSummary(stations, candidateCount = 0, availableCount = 0, dcLabel = '') {
+  function renderWaveformStationSummary(
+    stations,
+    candidateCount = 0,
+    checkedCount = 0,
+    availableCount = 0,
+    dcLabel = ''
+  ) {
     const container = $('#waveform-station-summary');
     if (!container) return;
 
     if (!stations.length) {
       const noResultReason = candidateCount > 0
-        ? `候補 ${candidateCount} チャンネルを確認しましたが、IRIS経由で波形取得可能な観測点はありませんでした。`
+        ? `候補 ${candidateCount} 件のうち近傍 ${checkedCount} チャンネルを確認しましたが、IRIS経由で波形取得可能な観測点はありませんでした。`
         : '周辺に観測点が見つかりませんでした。検索半径やデータセンターを変更してお試しください。';
       const dcInfo = dcLabel ? ` <span style="font-size:0.8rem; color:var(--text-secondary);">(${escapeHtml(dcLabel)})</span>` : '';
       container.innerHTML = `
@@ -831,7 +1072,7 @@
     container.innerHTML = `
       <div class="station-summary-header">
         <strong>観測点候補</strong>
-        <span>${availableCount} / ${candidateCount} チャンネルで加速度波形を取得可能${dcInfo}</span>
+        <span>全候補 ${candidateCount} 件 / 確認 ${checkedCount} 件 / 取得可能 ${availableCount} 件${dcInfo}</span>
       </div>
       <div class="station-summary-table-wrap">
         <table class="station-summary-table">
@@ -850,7 +1091,7 @@
     container.classList.remove('hidden');
 
     container.querySelectorAll('tbody tr[data-station-key]').forEach(row => {
-      row.addEventListener('click', () => {
+      const selectStation = () => {
         const stationKey = row.dataset.stationKey;
         const stationSel = $('#waveform-station');
         if (!stationSel) return;
@@ -858,9 +1099,12 @@
         const option = Array.from(stationSel.options).find(opt => opt.dataset.stationKey === stationKey);
         if (!option) return;
 
-        stationSel.value = option.value;
-        handleWaveformStationSelectionChange();
-      });
+        if (stationSel.value !== option.value) {
+          stationSel.value = option.value;
+          onWaveformStationSelectionChange();
+        }
+      };
+      row.addEventListener('click', selectStation);
     });
 
     updateSelectedWaveformStationSummary();
@@ -874,29 +1118,42 @@
     });
   }
 
+  function onWaveformStationSelectionChange() {
+    invalidateLoadedWaveform();
+    handleWaveformStationSelectionChange();
+  }
+
   async function handleWaveformStationSelectionChange() {
     updateSelectedWaveformStationSummary();
 
     const station = getSelectedWaveformStation();
     if (!station || !selectedFeature) {
+      stationInfoRequests.cancel();
       resetWaveformStationDetail();
       return;
     }
 
-    const requestSeq = ++waveformStationInfoRequestSeq;
+    const request = stationInfoRequests.begin();
     renderWaveformStationDetailLoading(station);
 
     try {
-      const info = await WaveformViewer.fetchStationPublicInfo(station, selectedFeature.properties.time);
-      if (requestSeq !== waveformStationInfoRequestSeq) return;
+      const info = await WaveformViewer.fetchStationPublicInfo(
+        station,
+        selectedFeature.properties.time,
+        { signal: request.signal }
+      );
+      if (!request.isCurrent()) return;
 
       const activeStation = getSelectedWaveformStation();
       if (!activeStation || activeStation.stationKey !== station.stationKey) return;
 
       renderWaveformStationDetail(info);
     } catch (err) {
-      if (requestSeq !== waveformStationInfoRequestSeq) return;
-      renderWaveformStationDetailError(station, err.message);
+      if (request.isCurrent() && !AppUtils.isAbortError(err)) {
+        renderWaveformStationDetailError(station, err.message);
+      }
+    } finally {
+      stationInfoRequests.finish(request.id);
     }
   }
 
@@ -960,6 +1217,14 @@
     const siteName = siteRow.SiteName || channelRow.SiteName || '';
     const titleCode = info.stationKey || `${channelRow.Network || ''}.${channelRow.Station || ''}.${channelRow.Location || '--'}.${channelRow.Channel || ''}`;
     const measurementNote = buildWaveformStationMeasurementNote(channelRow);
+    const stationTextUrl = AppUtils.sanitizeHttpUrl(info.urls?.stationTextUrl);
+    const channelTextUrl = AppUtils.sanitizeHttpUrl(info.urls?.channelTextUrl);
+    const responseXmlUrl = AppUtils.sanitizeHttpUrl(info.urls?.responseXmlUrl);
+    const metadataLinks = [
+      stationTextUrl ? `<a href="${escapeHtml(stationTextUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">Station text</a>` : '',
+      channelTextUrl ? `<a href="${escapeHtml(channelTextUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">Channel text</a>` : '',
+      responseXmlUrl ? `<a href="${escapeHtml(responseXmlUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">StationXML</a>` : '',
+    ].filter(Boolean).join('');
 
     const siteItems = [
       ['Network', siteRow.Network || channelRow.Network],
@@ -1004,9 +1269,7 @@
       </div>
       <div class="station-detail-note">${escapeHtml(measurementNote)}</div>
       <div class="station-detail-links">
-        <a href="${escapeHtml(info.urls.stationTextUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">Station text</a>
-        <a href="${escapeHtml(info.urls.channelTextUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">Channel text</a>
-        <a href="${escapeHtml(info.urls.responseXmlUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">StationXML</a>
+        ${metadataLinks}
       </div>
     `;
     container.classList.remove('hidden');
@@ -1057,6 +1320,8 @@
   // --- UI ヘルパー ---
   function showLoading(show) {
     els.loading.classList.toggle('active', show);
+    els.loading.setAttribute('aria-hidden', String(!show));
+    document.querySelector('main')?.setAttribute('aria-busy', String(show));
     els.btnSearch.disabled = show;
   }
 
@@ -1065,8 +1330,12 @@
     const div = document.createElement('div');
     div.className = 'error-msg';
     div.id = 'error-msg';
+    div.setAttribute('role', 'alert');
+    div.setAttribute('aria-live', 'assertive');
+    div.tabIndex = -1;
     div.textContent = message;
     els.tbody.closest('.card').insertBefore(div, els.tbody.closest('.table-wrapper'));
+    div.focus();
   }
 
   function clearError() {
@@ -1075,7 +1344,7 @@
   }
 
   function formatDateInput(date) {
-    return date.toISOString().split('T')[0];
+    return AppUtils.formatLocalDate(date);
   }
 
   function generateFilename(ext) {
@@ -1085,10 +1354,7 @@
   }
 
   function escapeHtml(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    return AppUtils.escapeHtml(str);
   }
 
   // --- 起動 ---

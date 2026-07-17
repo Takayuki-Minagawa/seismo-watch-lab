@@ -8,13 +8,14 @@
   --primary: #1a365d;
   --primary-light: #2a4a7f;
   --primary-dark: #0f2440;
-  --accent: #e53e3e;
+  --accent: #c53030;
   --accent-light: #fc8181;
+  --danger: #c53030;
   --bg: #f0f4f8;
   --surface: #ffffff;
   --text: #1a202c;
   --text-secondary: #4a5568;
-  --text-light: #718096;
+  --text-light: #4a5568;
   --border: #e2e8f0;
   --border-dark: #cbd5e0;
   --success: #48bb78;
@@ -230,11 +231,11 @@ a:hover {
 }
 
 .btn-accent {
-  background: var(--accent);
+  background: #c53030;
   color: #fff;
 }
 .btn-accent:hover {
-  background: #c53030;
+  background: #9b2c2c;
 }
 
 .btn-outline {
@@ -462,13 +463,30 @@ a:hover {
   text-align: left;
   font-weight: 600;
   white-space: nowrap;
-  cursor: pointer;
   user-select: none;
   position: sticky;
   top: 0;
 }
 
-.eq-table thead th:hover {
+.eq-table thead th[data-sort] {
+  padding: 0;
+}
+
+.sort-button {
+  display: block;
+  width: 100%;
+  padding: 0.55rem 0.6rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sort-button:hover,
+.sort-button:focus-visible {
   background: var(--primary-light);
 }
 
@@ -533,18 +551,18 @@ a:hover {
   text-align: center;
 }
 
-.mag-micro   { background: #48bb78; }
-.mag-minor   { background: #a0c45a; }
+.mag-micro   { background: #48bb78; color: #1a202c; }
+.mag-minor   { background: #a0c45a; color: #1a202c; }
 .mag-moderate { background: #ecc94b; color: #1a202c; }
-.mag-strong  { background: #ed8936; }
-.mag-major   { background: #e53e3e; }
+.mag-strong  { background: #ed8936; color: #1a202c; }
+.mag-major   { background: #c53030; }
 .mag-great   { background: #9b2c2c; }
 .mag-extreme { background: #4a0000; }
-.mag-unknown { background: #a0aec0; }
+.mag-unknown { background: #a0aec0; color: #1a202c; }
 
 /* --- 津波アイコン --- */
 .tsunami-icon {
-  color: #3182ce;
+  color: #2b6cb0;
   font-weight: 700;
   font-size: 0.8rem;
 }
@@ -635,7 +653,7 @@ a:hover {
 }
 
 .eq-popup .tsunami-warn {
-  color: #3182ce;
+  color: #2b6cb0;
   font-weight: 700;
   margin-top: 0.25rem;
 }
@@ -883,7 +901,9 @@ a:hover {
   --surface: #1e2533;
   --text: #e2e8f0;
   --text-secondary: #a0aec0;
-  --text-light: #718096;
+  --text-light: #a0aec0;
+  --accent: #fc8181;
+  --danger: #fc8181;
   --border: #2d3748;
   --border-dark: #4a5568;
   --shadow: 0 1px 3px rgba(0,0,0,0.3);
@@ -902,7 +922,8 @@ a:hover {
   background: #2d3748;
 }
 
-[data-theme="dark"] .eq-table thead th:hover {
+[data-theme="dark"] .sort-button:hover,
+[data-theme="dark"] .sort-button:focus-visible {
   background: #4a5568;
 }
 
@@ -924,6 +945,14 @@ a:hover {
 }
 
 [data-theme="dark"] .mag-moderate { color: #1a202c; }
+
+[data-theme="dark"] .btn-primary {
+  color: #1a202c;
+}
+
+[data-theme="dark"] .tsunami-icon {
+  color: #90cdf4;
+}
 
 [data-theme="dark"] .monitor-card,
 [data-theme="dark"] .monitor-box {
@@ -1201,6 +1230,51 @@ a:hover {
   padding: 0.5rem;
   background: var(--bg);
   border-radius: var(--radius-sm);
+}
+
+.spectrum-warning {
+  margin-top: 0.5rem;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.spectrum-summary {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+.spectrum-summary:empty {
+  display: none;
+}
+
+.spectrum-summary ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.sort-button:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: -3px;
+}
+
+.row-actions {
+  white-space: nowrap;
+}
+
+.row-actions .btn {
+  margin-right: 0.5rem;
+}
+
+.station-summary-message {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  color: var(--text-secondary);
 }
 
 /* --- 波形ビューア --- */

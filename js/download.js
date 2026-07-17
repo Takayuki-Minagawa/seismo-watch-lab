@@ -25,6 +25,13 @@ const Download = (() => {
    */
   function asCSV(geojson, filename = 'earthquakes.csv') {
     if (!geojson || !geojson.features) return;
+    const csv = earthquakeToCSV(geojson);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    triggerDownload(blob, filename);
+  }
+
+  function earthquakeToCSV(geojson) {
+    if (!geojson || !Array.isArray(geojson.features)) return '';
 
     // BOM付きUTF-8でExcel対応
     const BOM = '\uFEFF';
@@ -39,7 +46,7 @@ const Download = (() => {
       '震央(日本語)',
       '緯度',
       '経度',
-      '津波情報',
+      'USGS津波関連フラグ',
       '状態',
       'USGS ID',
       '詳細URL',
@@ -54,20 +61,18 @@ const Download = (() => {
         p.mag !== null ? p.mag : '',
         I18n.magnitudeLabel(p.mag),
         c[2] !== null ? c[2] : '',
-        `"${(p.place || '').replace(/"/g, '""')}"`,
-        `"${I18n.translatePlace(p.place).replace(/"/g, '""')}"`,
+        p.place || '',
+        I18n.translatePlace(p.place),
         c[1],
         c[0],
         p.tsunami ? 'あり' : 'なし',
         I18n.translateTerm(p.status) || p.status,
         p.ids || '',
         p.url || '',
-      ].join(',');
+      ].map(AppUtils.escapeCsvCell).join(',');
     });
 
-    const csv = BOM + headers.join(',') + '\n' + rows.join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    triggerDownload(blob, filename);
+    return BOM + headers.map(AppUtils.escapeCsvCell).join(',') + '\n' + rows.join('\n');
   }
 
   /**
@@ -89,7 +94,7 @@ const Download = (() => {
         震央_日本語: I18n.translatePlace(p.place),
         緯度: c[1],
         経度: c[0],
-        津波情報: p.tsunami ? 'あり' : 'なし',
+        USGS津波関連フラグ: p.tsunami ? 'あり' : 'なし',
         状態: I18n.translateTerm(p.status) || p.status,
         USGS_ID: p.ids,
         詳細URL: p.url,
@@ -111,9 +116,43 @@ const Download = (() => {
     triggerDownload(blob, filename);
   }
 
+  function spectrumToCSV(specData, type = 'sa') {
+    const typeLabels = {
+      sa: 'Sa_gal',
+      sv: 'Sv_cm_per_s',
+      sd: 'Sd_cm',
+    };
+    if (!specData || !Array.isArray(specData.periods) || !specData.results || !typeLabels[type]) {
+      throw new TypeError('応答スペクトルデータが不正です');
+    }
+
+    const entries = Object.entries(specData.results);
+    const header = [
+      'period_s',
+      ...entries.map(([damping]) => `${typeLabels[type]}_h${(Number(damping) * 100).toFixed(2)}pct`),
+    ];
+    const rows = specData.periods.map((period, index) => [
+      period,
+      ...entries.map(([, values]) => values[type]?.[index] ?? ''),
+    ]);
+
+    return '\uFEFF' + [header, ...rows]
+      .map(row => row.map(AppUtils.escapeCsvCell).join(','))
+      .join('\n');
+  }
+
+  function asSpectrumCSV(specData, type = 'sa', filename = 'response-spectrum.csv') {
+    const csv = spectrumToCSV(specData, type);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    triggerDownload(blob, filename);
+  }
+
   return {
     asCSV,
+    earthquakeToCSV,
     asJSON,
     asGeoJSON,
+    spectrumToCSV,
+    asSpectrumCSV,
   };
 })();

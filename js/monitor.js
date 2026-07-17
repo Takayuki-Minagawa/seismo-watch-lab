@@ -15,6 +15,7 @@ const MonitorDashboard = (() => {
     { name: '中央アジア', minlat: 20, maxlat: 50, minlon: 55, maxlon: 95 },
     { name: '大西洋', minlat: -60, maxlat: 70, minlon: -60, maxlon: 20 },
   ];
+  const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
   function init() {
     clear();
@@ -59,7 +60,7 @@ const MonitorDashboard = (() => {
       return mag > bestMag ? feature : best;
     }, null);
     const strongEvents = features.filter(feature => (feature.properties?.mag ?? 0) >= 6);
-    const tsunamiEvents = features.filter(feature => feature.properties?.tsunami);
+    const tsunamiLinkedEvents = features.filter(feature => feature.properties?.tsunami);
     const shallowStrong = features.filter(feature => {
       const mag = feature.properties?.mag ?? 0;
       const depth = feature.geometry?.coordinates?.[2] ?? 999;
@@ -67,14 +68,14 @@ const MonitorDashboard = (() => {
     });
     const hotspots = buildHotspots(features);
     const watchlist = buildWatchlist(features);
-    const status = buildStatus(features, strongEvents, tsunamiEvents, shallowStrong);
+    const status = buildStatus(features);
 
     return {
       total: features.length,
       latest,
       maxMagEvent,
       strongEvents,
-      tsunamiEvents,
+      tsunamiLinkedEvents,
       shallowStrong,
       hotspots,
       watchlist,
@@ -82,19 +83,37 @@ const MonitorDashboard = (() => {
     };
   }
 
-  function buildStatus(features, strongEvents, tsunamiEvents, shallowStrong) {
+  function buildStatus(features, now = Date.now()) {
     if (!features.length) {
       return { label: '通常', className: 'normal', note: '検索範囲内にデータなし' };
     }
 
-    const maxMag = Math.max(...features.map(feature => feature.properties?.mag ?? 0));
-    if (tsunamiEvents.length > 0 || maxMag >= 7.5) {
-      return { label: '高', className: 'high', note: '津波フラグまたはM7.5以上を検出' };
+    const recentFeatures = features.filter(feature => {
+      const time = feature.properties?.time;
+      const age = now - time;
+      return Number.isFinite(time) && age >= 0 && age <= RECENT_WINDOW_MS;
+    });
+    if (recentFeatures.length === 0) {
+      return { label: '通常', className: 'normal', note: '過去24時間の検索結果にイベントなし' };
     }
-    if (strongEvents.length > 0 || shallowStrong.length >= 2) {
-      return { label: '中', className: 'medium', note: 'M6以上または浅い強震を検出' };
+
+    const maxMag = recentFeatures.reduce(
+      (current, feature) => Math.max(current, feature.properties?.mag ?? 0),
+      0
+    );
+    const recentStrong = recentFeatures.filter(feature => (feature.properties?.mag ?? 0) >= 6);
+    const recentShallowStrong = recentFeatures.filter(feature => {
+      const magnitude = feature.properties?.mag ?? 0;
+      const depth = feature.geometry?.coordinates?.[2] ?? Infinity;
+      return magnitude >= 5.5 && depth <= 70;
+    });
+    if (maxMag >= 7.5) {
+      return { label: '高', className: 'high', note: '過去24時間の検索結果にM7.5以上' };
     }
-    return { label: '通常', className: 'normal', note: '検索範囲内に顕著な警戒条件なし' };
+    if (recentStrong.length > 0 || recentShallowStrong.length >= 2) {
+      return { label: '中', className: 'medium', note: '過去24時間の検索結果にM6以上等' };
+    }
+    return { label: '通常', className: 'normal', note: '過去24時間の検索結果に顕著な集計条件なし' };
   }
 
   function buildHotspots(features) {
@@ -148,7 +167,6 @@ const MonitorDashboard = (() => {
     else if (mag >= 5.5) score += 1;
     if (depth <= 30) score += 1.25;
     else if (depth <= 70) score += 0.75;
-    if (feature.properties?.tsunami) score += 2.5;
     return score;
   }
 
@@ -157,10 +175,10 @@ const MonitorDashboard = (() => {
     if (!cards) return;
 
     cards.innerHTML = [
-      cardHtml('監視判定', summary.status.label, summary.status.note, `status-${summary.status.className}`),
+      cardHtml('参考判定', summary.status.label, summary.status.note, `status-${summary.status.className}`),
       eventCardHtml('最大M', summary.maxMagEvent),
       cardHtml('M6以上', `${summary.strongEvents.length}件`, `${summary.total}件中`, summary.strongEvents.length ? 'status-medium' : ''),
-      cardHtml('津波フラグ', `${summary.tsunamiEvents.length}件`, 'USGS tsunami flag', summary.tsunamiEvents.length ? 'status-high' : ''),
+      cardHtml('USGS津波関連', `${summary.tsunamiLinkedEvents.length}件`, '警報・発生情報ではありません', ''),
       cardHtml('浅い強震', `${summary.shallowStrong.length}件`, 'M5.5以上・深さ70km以下', summary.shallowStrong.length ? 'status-medium' : ''),
       eventCardHtml('最新', summary.latest),
     ].join('');
@@ -189,7 +207,7 @@ const MonitorDashboard = (() => {
     if (!el) return;
     if (items.length === 0) {
       el.classList.add('empty');
-      el.textContent = '要注意条件に該当するイベントはありません';
+      el.textContent = '要確認条件に該当するイベントはありません';
       return;
     }
 
@@ -247,14 +265,15 @@ const MonitorDashboard = (() => {
   }
 
   function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str == null ? '' : String(str);
-    return div.innerHTML;
+    return AppUtils.escapeHtml(str);
   }
 
   return {
     init,
     render,
     clear,
+    buildSummaries,
+    buildStatus,
+    riskScore,
   };
 })();

@@ -70,7 +70,7 @@ const Spectrum = (() => {
     meta._dt = dt;
     meta._npts = acc.length;
     meta._duration = acc.length * dt;
-    meta._maxAcc = Math.max(...acc.map(Math.abs));
+    meta._maxAcc = AppUtils.maxAbs(acc);
 
     return { acc, dt, meta };
   }
@@ -107,7 +107,19 @@ const Spectrum = (() => {
       }
     }
 
-    return { acc, dt, meta: { _dt: dt, _npts: acc.length, _duration: acc.length * dt, _maxAcc: Math.max(...acc.map(Math.abs)) } };
+    if (acc.length === 0) throw new Error('加速度データが読み込めませんでした。');
+    if (!Number.isFinite(dt) || dt <= 0) throw new Error('サンプリング間隔が不正です。');
+
+    return {
+      acc,
+      dt,
+      meta: {
+        _dt: dt,
+        _npts: acc.length,
+        _duration: Math.max(0, (acc.length - 1) * dt),
+        _maxAcc: AppUtils.maxAbs(acc),
+      },
+    };
   }
 
   /**
@@ -118,11 +130,18 @@ const Spectrum = (() => {
    * @param {number} h - 減衰定数
    * @returns {Object} { sd, sv, sa } 最大応答値
    */
-  function sdofNewmark(ag, dt, T, h) {
+  function sdofNewmark(ag, dt, T, h, options = {}) {
+    validateAccelerationInput(ag, dt);
+    validateOscillator(T, h);
+    const evaluation = normalizeEvaluationRange(ag.length, dt, options);
+    return sdofNewmarkValidated(ag, dt, T, h, evaluation);
+  }
+
+  function sdofNewmarkValidated(ag, dt, T, h, evaluation) {
     if (T < 1e-10) {
       // T=0 → PGA
       let pga = 0;
-      for (let i = 0; i < ag.length; i++) {
+      for (let i = evaluation.startIndex; i <= evaluation.endIndex; i++) {
         const abs = Math.abs(ag[i]);
         if (abs > pga) pga = abs;
       }
@@ -142,14 +161,10 @@ const Spectrum = (() => {
 
     let maxU = 0;
     let maxV = 0;
-    let maxAbsA = Math.abs(ag[0]);
+    let maxAbsA = evaluation.startIndex === 0 ? Math.abs(a + ag[0]) : 0;
 
-    for (let i = 1; i < ag.length; i++) {
-      // 有効荷重増分
-      const dphat = -(ag[i] - ag[i - 1]) + (4 / dt) * v + 2 * a
-        + c * (2 * v + dt * a) / 1; // 簡略化
-
-      // 正しいNewmark平均加速度法の実装
+    // Newmark平均加速度法。評価区間の前も積分し、開始時の状態を継承する。
+    for (let i = 1; i <= evaluation.endIndex; i++) {
       const rhs = -ag[i] + (4 / dt2) * u + (4 / dt) * v + a
         + c * ((2 / dt) * u + v);
 
@@ -161,13 +176,15 @@ const Spectrum = (() => {
       v = v_new;
       a = a_new;
 
-      const absU = Math.abs(u);
-      const absV = Math.abs(v);
-      const absA = Math.abs(ag[i] + a); // 絶対加速度
+      if (i >= evaluation.startIndex) {
+        const absU = Math.abs(u);
+        const absV = Math.abs(v);
+        const absA = Math.abs(ag[i] + a); // 絶対加速度
 
-      if (absU > maxU) maxU = absU;
-      if (absV > maxV) maxV = absV;
-      if (absA > maxAbsA) maxAbsA = absA;
+        if (absU > maxU) maxU = absU;
+        if (absV > maxV) maxV = absV;
+        if (absA > maxAbsA) maxAbsA = absA;
+      }
     }
 
     return { sd: maxU, sv: maxV, sa: maxAbsA };
@@ -186,11 +203,20 @@ const Spectrum = (() => {
       periodMin = 0.02,
       periodMax = 10.0,
       periodCount = 100,
+      samplesPerPeriod = 10,
     } = options;
+
+    validateAccelerationInput(ag, dt);
+    validateSpectrumOptions(hList, periodMin, periodMax, periodCount, samplesPerPeriod);
+    const evaluation = normalizeEvaluationRange(ag.length, dt, options);
+    const effectivePeriodMin = Math.max(periodMin, samplesPerPeriod * dt);
+    if (effectivePeriodMin >= periodMax) {
+      throw new RangeError(`入力刻みから定まる有効最短周期 ${effectivePeriodMin.toFixed(3)} 秒は最大周期未満である必要があります`);
+    }
 
     // 対数スケールで周期を生成
     const periods = [0]; // T=0 (PGA)
-    const logMin = Math.log10(periodMin);
+    const logMin = Math.log10(effectivePeriodMin);
     const logMax = Math.log10(periodMax);
     for (let i = 0; i < periodCount; i++) {
       const logT = logMin + (logMax - logMin) * i / (periodCount - 1);
@@ -201,7 +227,7 @@ const Spectrum = (() => {
     for (const h of hList) {
       const sa = [], sv = [], sd = [];
       for (const T of periods) {
-        const resp = sdofNewmark(ag, dt, T, h);
+        const resp = sdofNewmarkValidated(ag, dt, T, h, evaluation);
         sa.push(resp.sa);
         sv.push(resp.sv);
         sd.push(resp.sd);
@@ -209,7 +235,85 @@ const Spectrum = (() => {
       results[h] = { sa, sv, sd };
     }
 
-    return { periods, results };
+    return {
+      periods,
+      results,
+      meta: {
+        dt,
+        requestedPeriodMin: periodMin,
+        effectivePeriodMin,
+        periodMax,
+        periodCount,
+        samplesPerPeriod,
+        periodMinAdjusted: effectivePeriodMin > periodMin,
+        evaluationStart: evaluation.startIndex * dt,
+        evaluationEnd: evaluation.endIndex * dt,
+        evaluationStartIndex: evaluation.startIndex,
+        evaluationEndIndex: evaluation.endIndex,
+        pga: maxAbsInRange(ag, evaluation.startIndex, evaluation.endIndex),
+      },
+    };
+  }
+
+  function validateAccelerationInput(ag, dt) {
+    if (!ag || typeof ag.length !== 'number' || ag.length < 2) {
+      throw new TypeError('加速度波形は2点以上必要です');
+    }
+    if (!Number.isFinite(dt) || dt <= 0) {
+      throw new RangeError('サンプリング間隔は正の有限値にしてください');
+    }
+    for (let index = 0; index < ag.length; index++) {
+      if (!Number.isFinite(ag[index])) {
+        throw new TypeError(`加速度波形の${index + 1}点目が有限値ではありません`);
+      }
+    }
+  }
+
+  function maxAbsInRange(values, startIndex, endIndex) {
+    let max = 0;
+    for (let index = startIndex; index <= endIndex; index++) {
+      const absolute = Math.abs(values[index]);
+      if (absolute > max) max = absolute;
+    }
+    return max;
+  }
+
+  function validateOscillator(period, damping) {
+    if (!Number.isFinite(period) || period < 0) {
+      throw new RangeError('固有周期は0以上の有限値にしてください');
+    }
+    if (!Number.isFinite(damping) || damping < 0 || damping >= 1) {
+      throw new RangeError('減衰定数は0以上1未満にしてください');
+    }
+  }
+
+  function validateSpectrumOptions(hList, periodMin, periodMax, periodCount, samplesPerPeriod) {
+    if (!Array.isArray(hList) || hList.length === 0 || hList.length > 10) {
+      throw new RangeError('減衰定数は1〜10個指定してください');
+    }
+    hList.forEach(damping => validateOscillator(0, damping));
+    if (!Number.isFinite(periodMin) || periodMin <= 0) {
+      throw new RangeError('最短周期は正の有限値にしてください');
+    }
+    if (!Number.isFinite(periodMax) || periodMax <= periodMin) {
+      throw new RangeError('最大周期は最短周期より大きい有限値にしてください');
+    }
+    if (!Number.isInteger(periodCount) || periodCount < 2 || periodCount > 1000) {
+      throw new RangeError('周期分割数は2〜1000の整数にしてください');
+    }
+    if (!Number.isFinite(samplesPerPeriod) || samplesPerPeriod < 2) {
+      throw new RangeError('1周期あたりの必要サンプル数は2以上にしてください');
+    }
+  }
+
+  function normalizeEvaluationRange(length, dt, options = {}) {
+    const maxIndex = length - 1;
+    const startSeconds = Number.isFinite(options.evaluationStart) ? options.evaluationStart : 0;
+    const endSeconds = Number.isFinite(options.evaluationEnd) ? options.evaluationEnd : maxIndex * dt;
+    const startIndex = Math.max(0, Math.min(maxIndex, AppUtils.sampleIndexAtOrAfter(startSeconds, dt)));
+    const endIndex = Math.max(startIndex, Math.min(maxIndex, AppUtils.sampleIndexAtOrBefore(endSeconds, dt)));
+    if (endIndex <= startIndex) throw new RangeError('応答評価区間には2点以上必要です');
+    return { startIndex, endIndex };
   }
 
   /**
@@ -283,7 +387,7 @@ const Spectrum = (() => {
       const values = data[type].slice(1);
       datasets.push({
         label: `h=${(parseFloat(h) * 100).toFixed(0)}%`,
-        data: values,
+        data: specData.periods.slice(1).map((period, index) => ({ x: period, y: values[index] })),
         borderColor: colors[colorIdx % colors.length],
         borderWidth: 2,
         pointRadius: 0,
@@ -292,13 +396,10 @@ const Spectrum = (() => {
       colorIdx++;
     }
 
-    const periods = specData.periods.slice(1); // T=0を除外
-
     if (spectrumChart) spectrumChart.destroy();
     spectrumChart = new Chart(ctx, {
       type: 'line',
       data: {
-        labels: periods.map(t => t.toFixed(3)),
         datasets: datasets,
       },
       options: {
@@ -339,7 +440,9 @@ const Spectrum = (() => {
   return {
     parseKNET,
     parseCSV,
+    sdofNewmark,
     computeSpectrum,
+    normalizeEvaluationRange,
     renderWaveform,
     renderSpectrum,
     clearCharts,
