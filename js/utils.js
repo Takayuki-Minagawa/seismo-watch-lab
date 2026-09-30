@@ -106,6 +106,9 @@ const AppUtils = (() => {
       isCurrent(id) {
         return id === sequence;
       },
+      isActive() {
+        return controller !== null;
+      },
     };
   }
 
@@ -161,6 +164,26 @@ const AppUtils = (() => {
     return error?.name === 'AbortError';
   }
 
+  // USGS の日付指定は UTC。終了日を含め、翌日00:00のイベントは含めない。
+  function buildUTCDateRange(startdate, enddate) {
+    const parseDay = (value, label) => {
+      if (!value) return null;
+      const date = new Date(`${value}T00:00:00.000Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(date.getTime())
+          || date.toISOString().slice(0, 10) !== value) {
+        throw new RangeError(`${label}が不正です`);
+      }
+      return date;
+    };
+    const start = parseDay(startdate, '開始日');
+    const end = parseDay(enddate, '終了日');
+    if (start && end && start > end) throw new RangeError('開始日は終了日以前にしてください');
+    const range = {};
+    if (start) range.starttime = start.toISOString();
+    if (end) range.endtime = new Date(end.getTime() + 86400000 - 1).toISOString();
+    return range;
+  }
+
   return Object.freeze({
     escapeHtml,
     sanitizeHttpUrl,
@@ -170,6 +193,7 @@ const AppUtils = (() => {
     sampleIndexAtOrBefore,
     escapeCsvCell,
     formatLocalDate,
+    buildUTCDateRange,
     createRequestCoordinator,
     fetchWithTimeout,
     fetchTextWithTimeout,

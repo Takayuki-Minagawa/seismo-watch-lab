@@ -3,7 +3,6 @@
  * IRIS FDSN Web Servicesを利用して計器補正済み加速度波形を表示
  */
 const WaveformViewer = (() => {
-  const IRIS_STATION_URL = 'https://service.iris.edu/fdsnws/station/1/query';
   const TIMESERIES_URL = 'https://service.iris.edu/irisws/timeseries/1/query';
   const MAX_PLOT_POINTS = 4000;
   const STATION_PREVIEW_CONCURRENCY = 4;
@@ -262,6 +261,7 @@ const WaveformViewer = (() => {
   }
 
   function buildStationQueryURL(station, level = 'channel', format = 'text', eventTime = null) {
+    const datacenter = FDSN_DATACENTERS[station._datacenter] || FDSN_DATACENTERS.iris;
     const params = new URLSearchParams({
       net: station.network,
       sta: station.station,
@@ -281,11 +281,13 @@ const WaveformViewer = (() => {
       params.set('endafter', irisTime);
     }
 
-    return `${IRIS_STATION_URL}?${params.toString()}`;
+    return `${datacenter.stationUrl}?${params.toString()}`;
   }
 
   function getStationPublicInfoCacheKey(station, eventTime = null) {
+    const datacenter = FDSN_DATACENTERS[station._datacenter] || FDSN_DATACENTERS.iris;
     return [
+      datacenter.stationUrl,
       station.stationKey || `${station.network}.${station.station}.${station.location || '--'}.${station.channel}`,
       eventTime ? normalizeIRISTimeValue(eventTime) : '',
     ].join('|');
@@ -304,6 +306,7 @@ const WaveformViewer = (() => {
     const siteRow = await fetchStationSiteRow(stationTextUrl, options);
     const info = {
       stationKey: station.stationKey,
+      datacenterLabel: (FDSN_DATACENTERS[station._datacenter] || FDSN_DATACENTERS.iris).label,
       siteRow,
       channelRow: station._rawChannelMetadata || buildFallbackChannelRow(station),
       urls: {

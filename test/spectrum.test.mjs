@@ -103,3 +103,33 @@ test('spectrum input validation rejects non-finite data and invalid damping', ()
   assert.throws(() => Spectrum.computeSpectrum([0, 1], 0, { hList: [0.05] }), /サンプリング間隔/);
   assert.throws(() => Spectrum.computeSpectrum([0, 1], 0.01, { hList: [1] }), /減衰定数/);
 });
+
+test('invalidating a spectrum chart preserves the input waveform chart', () => {
+  const charts = [];
+  const chartContext = createBrowserLikeContext({
+    document: { getElementById: id => ({ id }) },
+    Chart: class {
+      constructor(canvas) {
+        this.canvas = canvas;
+        this.destroyCount = 0;
+        charts.push(this);
+      }
+      destroy() { this.destroyCount += 1; }
+    },
+  });
+  const { exported: chartSpectrum } = loadClassicScript('js/spectrum.js', 'Spectrum', chartContext);
+  chartSpectrum.renderWaveform([0, 1, 0], 0.01, 'input-waveform');
+  chartSpectrum.renderSpectrum({
+    periods: [0, 0.1, 1],
+    results: { 0.05: { sa: [1, 2, 1], sv: [0, 1, 0], sd: [0, 1, 0] } },
+  }, 'response-spectrum');
+
+  chartSpectrum.clearSpectrumChart();
+  chartSpectrum.clearSpectrumChart();
+  assert.equal(charts[0].destroyCount, 0);
+  assert.equal(charts[1].destroyCount, 1);
+
+  chartSpectrum.clearCharts();
+  assert.equal(charts[0].destroyCount, 1);
+  assert.equal(charts[1].destroyCount, 1);
+});

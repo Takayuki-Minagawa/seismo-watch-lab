@@ -70,11 +70,11 @@
       <div class="card-body">
         <div class="search-grid">
           <div class="form-group">
-            <label for="startdate">開始日</label>
+            <label for="startdate">開始日 (UTC)</label>
             <input type="date" id="startdate">
           </div>
           <div class="form-group">
-            <label for="enddate">終了日</label>
+            <label for="enddate">終了日 (UTC・当日を含む)</label>
             <input type="date" id="enddate">
           </div>
           <div class="form-group">
@@ -91,7 +91,7 @@
           </div>
           <div class="form-group">
             <label for="maxdepth">最大深さ (km)</label>
-            <input type="number" id="maxdepth" placeholder="例: 300" min="0" max="1000">
+            <input type="number" id="maxdepth" placeholder="例: 300" min="-100" max="1000">
           </div>
           <div class="form-group">
             <label for="region">地域</label>
@@ -104,6 +104,7 @@
               <option value="mediterranean">地中海</option>
               <option value="central_asia">中央アジア</option>
               <option value="custom">カスタム範囲</option>
+              <option value="circle">中心座標・半径で検索</option>
             </select>
           </div>
           <div class="form-group">
@@ -138,6 +139,21 @@
           </div>
         </div>
 
+        <div id="circle-bounds" class="search-grid" style="display:none; margin-top:0.75rem;">
+          <div class="form-group">
+            <label for="circle-latitude">中心 緯度 (°)</label>
+            <input type="number" id="circle-latitude" min="-90" max="90" step="any" placeholder="例: 35.68">
+          </div>
+          <div class="form-group">
+            <label for="circle-longitude">中心 経度 (°)</label>
+            <input type="number" id="circle-longitude" min="-180" max="180" step="any" placeholder="例: 139.76">
+          </div>
+          <div class="form-group">
+            <label for="circle-radius">検索半径 (km)</label>
+            <input type="number" id="circle-radius" min="0" max="20001.6" step="any" placeholder="例: 100">
+          </div>
+        </div>
+
         <!-- 検索ボタン＆クイック検索＆保存 -->
         <div class="search-actions">
           <button class="btn btn-primary" id="btn-search">検索</button>
@@ -151,6 +167,8 @@
             <button class="btn btn-outline btn-sm" data-quick="365d-7.0">1年間 M7.0+</button>
           </div>
         </div>
+
+        <p id="search-mode-status" class="search-mode-status" role="status">フォームの条件で検索します。</p>
 
         <!-- 保存済み検索条件 -->
         <div class="saved-row" style="margin-top:0.5rem;">
@@ -212,6 +230,7 @@
         </div>
       </div>
 
+      <p id="results-limit-notice" class="results-notice" role="status" hidden>取得上限に達しました。期間内の全件ではない可能性があります。地図・統計・ダウンロードは取得した地震のみを対象とします。期間や地域を絞るか、最大取得件数を増やしてください。</p>
       <div class="table-wrapper">
         <table class="eq-table" id="eq-table">
           <thead>

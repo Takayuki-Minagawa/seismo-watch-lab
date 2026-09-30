@@ -12,8 +12,7 @@
   let currentSort = { key: 'time', asc: false };
   let currentPage = 1;
   let selectedFeature = null;
-  let lastSearchType = 'manual';  // 'manual' | 'quick'
-  let lastQuickType = null;       // '24h-4.5' 等
+  let lastSearch = null; // 最後に成功した検索。編集中のフォームとは独立して保持する。
   let spectrumInputData = null;
   let currentSpectrumResult = null;
   let spectrumCalculationSeq = 0;
@@ -71,13 +70,7 @@
     // 拡張モジュール初期化
     MonitorDashboard.init();
     Settings.initDarkMode();
-    Settings.initAutoRefresh(() => {
-      if (lastSearchType === 'quick' && lastQuickType) {
-        quickSearch(lastQuickType);
-      } else {
-        executeSearch();
-      }
-    });
+    Settings.initAutoRefresh(refreshLastSearch);
     Settings.initSavedSearches();
     Settings.initShare();
     Settings.onThemeChange(() => Charts.refreshTheme(currentData));
@@ -141,18 +134,34 @@
 
   // --- 検索実行 ---
   async function executeSearch() {
-    const params = buildSearchParams();
-    if (!params) return;
+    const quickType = Settings.getActiveQuickType();
+    if (quickType) return quickSearch(quickType);
+    let params;
+    try {
+      params = buildSearchParams();
+      EarthquakeAPI.validateSearchParams(params);
+    } catch (error) {
+      showError(error.message);
+      return;
+    }
+    return runManualSearch(params);
+  }
 
+  async function runManualSearch(params) {
     await runSearch(
       signal => EarthquakeAPI.search(params, { signal }),
       data => {
-        lastSearchType = 'manual';
-        lastQuickType = null;
-        Settings.setActiveQuickType(null);
+        lastSearch = { type: 'manual', params: JSON.parse(JSON.stringify(params)) };
         handleResults(data);
       }
     );
+  }
+
+  function refreshLastSearch() {
+    // 更新タイマーがユーザーの新しい検索を中断しないようにする。
+    if (!lastSearch || searchRequests.isActive()) return;
+    if (lastSearch.type === 'quick') return quickSearch(lastSearch.quick, { updateDraft: false });
+    return runManualSearch(lastSearch.params);
   }
 
   // --- クイック検索 ---
@@ -164,16 +173,15 @@
     '365d-7.0': { hours: 8760, minMag: 7.0, limit: 500, label: '1年間 M7.0+' },
   };
 
-  async function quickSearch(type) {
+  async function quickSearch(type, { updateDraft = true } = {}) {
     const preset = quickPresets[type];
     if (!preset) return;
+    if (updateDraft) Settings.setActiveQuickType(type);
 
     await runSearch(
       signal => EarthquakeAPI.recentSearch(preset.hours, preset.minMag, preset.limit, { signal }),
       data => {
-        lastSearchType = 'quick';
-        lastQuickType = type;
-        Settings.setActiveQuickType(type);
+        lastSearch = { type: 'quick', quick: type };
         handleResults(data);
       }
     );
@@ -198,14 +206,7 @@
 
   // --- 検索パラメータ組み立て ---
   function buildSearchParams() {
-    const params = {};
-
-    if (els.startdate.value) params.starttime = els.startdate.value;
-    if (els.enddate.value) {
-      const end = new Date(`${els.enddate.value}T00:00:00`);
-      end.setDate(end.getDate() + 1);
-      params.endtime = formatDateInput(end);
-    }
+    const params = AppUtils.buildUTCDateRange(els.startdate.value, els.enddate.value);
     if (els.minmag.value) params.minmagnitude = els.minmag.value;
     if (els.maxdepth.value) params.maxdepth = els.maxdepth.value;
     if (els.limit.value) params.limit = els.limit.value;
@@ -217,6 +218,11 @@
       params.maxlat = $('#custom-maxlat').value;
       params.minlon = $('#custom-minlon').value;
       params.maxlon = $('#custom-maxlon').value;
+    } else if (regionKey === 'circle') {
+      params.requireCircle = true;
+      params.latitude = $('#circle-latitude').value;
+      params.longitude = $('#circle-longitude').value;
+      params.maxradiuskm = $('#circle-radius').value;
     } else if (regionKey !== 'global') {
       const presets = EarthquakeAPI.getRegionPresets();
       const preset = presets[regionKey];
@@ -239,6 +245,7 @@
     currentPage = 1;
     currentSort = { key: 'time', asc: false };
     selectedFeature = null;
+    DetailPanel.close();
 
     const waveformLabel = $('#waveform-eq-label');
     if (waveformLabel) waveformLabel.value = '';
@@ -246,6 +253,7 @@
 
     const count = data.features ? data.features.length : 0;
     els.resultsCount.textContent = `検索結果: ${count}件`;
+    $('#results-limit-notice').hidden = !data.metadata?.limitReached;
 
     const hasData = count > 0;
     els.btnCSV.disabled = !hasData;
@@ -253,6 +261,8 @@
     els.btnGeoJSON.disabled = !hasData;
 
     if (count === 0) {
+      sortedFeatures = [];
+      updateSortHeaders();
       els.tbody.innerHTML = `
         <tr><td colspan="7">
           <div class="empty-state">
@@ -459,6 +469,7 @@
   // --- 地域選択変更 ---
   function onRegionChange() {
     els.customBounds.style.display = els.region.value === 'custom' ? 'grid' : 'none';
+    $('#circle-bounds').style.display = els.region.value === 'circle' ? 'grid' : 'none';
   }
 
   // --- フォームリセット ---
@@ -472,6 +483,9 @@
     els.region.value = 'global';
     els.limit.value = '200';
     els.customBounds.style.display = 'none';
+    $('#circle-bounds').style.display = 'none';
+    ['#circle-latitude', '#circle-longitude', '#circle-radius'].forEach(id => { $(id).value = ''; });
+    Settings.setActiveQuickType(null);
     $('#custom-minlat').value = '';
     $('#custom-maxlat').value = '';
     $('#custom-minlon').value = '';
@@ -693,6 +707,7 @@
         currentWaveformView = { start: 0, end: null };
         setWaveformViewControlsEnabled(false);
         WaveformViewer.resetDisplay('waveform-display');
+        resetSpectrumState();
         Settings.showToast(`波形取得エラー: ${err.message}`);
       } finally {
         if (request.isCurrent()) {
@@ -710,8 +725,12 @@
       }
 
       try {
-        currentWaveformView = getWaveformViewRangeFromInputs();
-        WaveformViewer.renderWaveform(currentWaveformData, 'waveform-display', currentWaveformView);
+        const range = getWaveformViewRangeFromInputs();
+        // 描画の前にサンプル数を検証し、不正区間で現在の解析状態を失わない。
+        WaveformViewer.sliceWaveformData(currentWaveformData, range.start, range.end);
+        WaveformViewer.renderWaveform(currentWaveformData, 'waveform-display', range);
+        currentWaveformView = range;
+        updateWaveformViewInputs(range.start, range.end);
         syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
       } catch (err) {
         Settings.showToast(err.message);
@@ -745,6 +764,7 @@
     spectrumInputData = data;
     currentSpectrumResult = null;
     spectrumCalculationSeq += 1;
+    Spectrum.clearSpectrumChart();
     Spectrum.renderWaveform(displayData.acc, displayData.dt, 'chart-waveform-input');
 
     const btnCalc = $('#btn-calc-spectrum');
@@ -909,7 +929,6 @@
       throw new Error(`表示終了秒は表示開始秒より ${minSpan.toFixed(2)} 秒以上大きくしてください`);
     }
 
-    updateWaveformViewInputs(start, end);
     return { start, end };
   }
 
@@ -1185,7 +1204,7 @@
           <strong>観測点公開メタデータ</strong>
           <span>${escapeHtml(station.stationKey || `${station.network}.${station.station}`)}</span>
         </div>
-        <span class="station-detail-status">EarthScope から取得中...</span>
+        <span class="station-detail-status">${escapeHtml(station._datacenterLabel || 'IRIS / EarthScope')} から取得中...</span>
       </div>
     `;
     container.classList.remove('hidden');
@@ -1261,7 +1280,7 @@
           <strong>観測点公開メタデータ</strong>
           <span>${escapeHtml(titleCode)}</span>
         </div>
-        <span class="station-detail-status">${escapeHtml(siteName || 'EarthScope FDSN Station metadata')}</span>
+        <span class="station-detail-status">${escapeHtml(siteName || info.datacenterLabel || 'FDSN Station metadata')}</span>
       </div>
       <div class="station-detail-grid">
         ${buildWaveformStationDetailSection('Site / Station', siteItems)}
@@ -1344,7 +1363,7 @@
   }
 
   function formatDateInput(date) {
-    return AppUtils.formatLocalDate(date);
+    return date.toISOString().slice(0, 10);
   }
 
   function generateFilename(ext) {

@@ -4,6 +4,15 @@
 const Settings = (() => {
   const STORAGE_KEY_THEME = 'seismo-theme';
   const STORAGE_KEY_SAVED = 'seismo-saved-searches';
+  const QUICK_TYPES = new Set(['24h-4.5', '7d-5.0', '30d-6.0', '365d-7.0']);
+  const SEARCH_FIELDS = {
+    startdate: 'startdate', enddate: 'enddate', minmag: 'minmag',
+    maxdepth: 'maxdepth', region: 'region', limit: 'limit',
+    minlat: 'custom-minlat', maxlat: 'custom-maxlat',
+    minlon: 'custom-minlon', maxlon: 'custom-maxlon',
+    latitude: 'circle-latitude', longitude: 'circle-longitude',
+    maxradiuskm: 'circle-radius',
+  };
   let autoRefreshTimer = null;
   let autoRefreshCallback = null;
   let themeChangeCallback = null;
@@ -110,6 +119,15 @@ const Settings = (() => {
     if (btnSave) btnSave.addEventListener('click', saveCurrentSearch);
     if (btnDelete) btnDelete.addEventListener('click', deleteSelectedSearch);
     if (sel) sel.addEventListener('change', loadSelectedSearch);
+
+    // 手入力やリセット後の保存・共有には、以前のクイック検索を混ぜない。
+    const useManualSearch = () => setActiveQuickType(null);
+    Object.values(SEARCH_FIELDS).forEach(id => {
+      const field = document.getElementById(id);
+      field?.addEventListener('input', useManualSearch);
+      field?.addEventListener('change', useManualSearch);
+    });
+    document.getElementById('btn-reset')?.addEventListener('click', useManualSearch);
   }
 
   function getSavedSearches() {
@@ -186,7 +204,15 @@ const Settings = (() => {
   }
 
   function setActiveQuickType(type) {
-    activeQuickType = type || null;
+    activeQuickType = QUICK_TYPES.has(type) ? type : null;
+    const labels = {
+      '24h-4.5': '24時間 M4.5+', '7d-5.0': '7日間 M5.0+',
+      '30d-6.0': '30日間 M6.0+', '365d-7.0': '1年間 M7.0+',
+    };
+    const status = document.getElementById('search-mode-status');
+    if (status) status.textContent = activeQuickType
+      ? `クイック検索: ${labels[activeQuickType]}（世界全体）。フォームを編集すると通常検索に戻ります。`
+      : 'フォームの条件で検索します。';
   }
 
   function getActiveQuickType() {
@@ -194,18 +220,10 @@ const Settings = (() => {
   }
 
   function getCurrentSearchParams() {
-    const params = {
-      startdate: document.getElementById('startdate')?.value || '',
-      enddate: document.getElementById('enddate')?.value || '',
-      minmag: document.getElementById('minmag')?.value || '',
-      maxdepth: document.getElementById('maxdepth')?.value || '',
-      region: document.getElementById('region')?.value || '',
-      limit: document.getElementById('limit')?.value || '',
-      minlat: document.getElementById('custom-minlat')?.value || '',
-      maxlat: document.getElementById('custom-maxlat')?.value || '',
-      minlon: document.getElementById('custom-minlon')?.value || '',
-      maxlon: document.getElementById('custom-maxlon')?.value || '',
-    };
+    const params = {};
+    Object.entries(SEARCH_FIELDS).forEach(([key, id]) => {
+      params[key] = document.getElementById(id)?.value || '';
+    });
     // クイック検索の場合はその種別も記録
     if (activeQuickType) {
       params.quick = activeQuickType;
@@ -214,21 +232,20 @@ const Settings = (() => {
   }
 
   function applySearchParams(params) {
-    const fields = ['startdate', 'enddate', 'minmag', 'maxdepth', 'region', 'limit'];
-    fields.forEach(id => {
+    setActiveQuickType(params.quick);
+    Object.entries(SEARCH_FIELDS).forEach(([key, id]) => {
       const el = document.getElementById(id);
-      if (el && params[id] !== undefined) el.value = params[id];
-    });
-    // カスタム範囲
-    ['custom-minlat', 'custom-maxlat', 'custom-minlon', 'custom-maxlon'].forEach(id => {
-      const el = document.getElementById(id);
-      const key = id.replace('custom-', '');
       if (el && params[key] !== undefined) el.value = params[key];
     });
-    // カスタム範囲表示切替
+    // URLの一部だけを復元する場合も、実際の地域選択と表示を合わせる。
+    const region = document.getElementById('region')?.value;
     const customBounds = document.getElementById('custom-bounds');
     if (customBounds) {
-      customBounds.style.display = params.region === 'custom' ? 'grid' : 'none';
+      customBounds.style.display = region === 'custom' ? 'grid' : 'none';
+    }
+    const circleBounds = document.getElementById('circle-bounds');
+    if (circleBounds) {
+      circleBounds.style.display = region === 'circle' ? 'grid' : 'none';
     }
   }
 
@@ -242,7 +259,8 @@ const Settings = (() => {
     const params = getCurrentSearchParams();
     const searchParams = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
-      if (v) searchParams.set(k, v);
+      // 空欄も保存して、共有先の初期値で検索条件が変わらないようにする。
+      searchParams.set(k, v);
     });
     const url = `${location.origin}${location.pathname}?${searchParams.toString()}`;
 
@@ -261,23 +279,16 @@ const Settings = (() => {
 
     // クイック検索パラメータ優先
     const quickType = params.get('quick');
-    if (quickType) {
-      activeQuickType = quickType;
+    setActiveQuickType(quickType);
+    if (activeQuickType) {
       return 'quick';
     }
 
-    const mapping = {
-      startdate: 'startdate', enddate: 'enddate', minmag: 'minmag',
-      maxdepth: 'maxdepth', region: 'region', limit: 'limit',
-      minlat: 'minlat', maxlat: 'maxlat', minlon: 'minlon', maxlon: 'maxlon',
-    };
-
     const restored = {};
     let hasAny = false;
-    Object.entries(mapping).forEach(([urlKey, paramKey]) => {
-      const val = params.get(urlKey);
-      if (val) {
-        restored[paramKey] = val;
+    Object.keys(SEARCH_FIELDS).forEach(key => {
+      if (params.has(key)) {
+        restored[key] = params.get(key);
         hasAny = true;
       }
     });

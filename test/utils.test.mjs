@@ -52,6 +52,19 @@ test('formatLocalDate preserves the local calendar date', () => {
   assert.equal(AppUtils.formatLocalDate(localEarlyMorning), '2026-07-17');
 });
 
+test('UTC date filters include the last millisecond of the end day, not the next day', () => {
+  const range = AppUtils.buildUTCDateRange('2024-02-28', '2024-02-29');
+  assert.equal(range.starttime, '2024-02-28T00:00:00.000Z');
+  assert.equal(range.endtime, '2024-02-29T23:59:59.999Z');
+  assert.equal(Object.keys(AppUtils.buildUTCDateRange('', '')).length, 0);
+});
+
+test('UTC date filters reject one-day reversal and impossible calendar dates', () => {
+  assert.throws(() => AppUtils.buildUTCDateRange('2026-09-30', '2026-09-29'), /開始日は終了日/);
+  assert.throws(() => AppUtils.buildUTCDateRange('2026-02-29', ''), /開始日が不正/);
+  assert.throws(() => AppUtils.buildUTCDateRange('', 'not-a-date'), /終了日が不正/);
+});
+
 test('request coordinator invalidates and aborts the previous request', () => {
   const coordinator = AppUtils.createRequestCoordinator();
   const first = coordinator.begin();
@@ -61,6 +74,20 @@ test('request coordinator invalidates and aborts the previous request', () => {
   assert.equal(first.isCurrent(), false);
   assert.equal(second.signal.aborted, false);
   assert.equal(second.isCurrent(), true);
+});
+
+test('request coordinator stays active when a superseded request finishes', () => {
+  const coordinator = AppUtils.createRequestCoordinator();
+  assert.equal(coordinator.isActive(), false);
+  const first = coordinator.begin();
+  const second = coordinator.begin();
+  coordinator.finish(first.id);
+  assert.equal(coordinator.isActive(), true);
+  coordinator.finish(second.id);
+  assert.equal(coordinator.isActive(), false);
+  coordinator.begin();
+  coordinator.cancel();
+  assert.equal(coordinator.isActive(), false);
 });
 
 test('text fetch timeout remains active while the response body is being consumed', async () => {

@@ -53,7 +53,7 @@ const EarthquakeAPI = (() => {
       return fetchGeoJSON(query, options);
     }));
 
-    if (responses.length === 1) return responses[0];
+    if (responses.length === 1) return withResultMetadata(responses[0], params.limit);
     return mergeGeoJSONResponses(responses, params.limit);
   }
 
@@ -78,7 +78,7 @@ const EarthquakeAPI = (() => {
     return regionPresets;
   }
 
-  function buildQuery(params, bounds) {
+  function buildQuery(params, bounds = params) {
     const query = new URLSearchParams({
       format: 'geojson',
       orderby: 'time',
@@ -92,6 +92,10 @@ const EarthquakeAPI = (() => {
     if (hasValue(params.mindepth)) query.set('mindepth', params.mindepth);
     if (hasValue(params.maxdepth)) query.set('maxdepth', params.maxdepth);
     if (hasValue(params.limit)) query.set('limit', params.limit);
+
+    if (hasValue(params.latitude)) query.set('latitude', params.latitude);
+    if (hasValue(params.longitude)) query.set('longitude', params.longitude);
+    if (hasValue(params.maxradiuskm)) query.set('maxradiuskm', params.maxradiuskm);
 
     if (bounds.minlat !== undefined) query.set('minlatitude', bounds.minlat);
     if (bounds.maxlat !== undefined) query.set('maxlatitude', bounds.maxlat);
@@ -116,11 +120,56 @@ const EarthquakeAPI = (() => {
       throw new Error(`APIエラー (HTTP ${response.status})`);
     }
 
+    if (response.status === 204) {
+      return { type: 'FeatureCollection', features: [], metadata: { count: 0 } };
+    }
+
+    let data;
     try {
-      return JSON.parse(text);
+      data = JSON.parse(text);
     } catch (_) {
       throw new Error('USGS APIの応答をJSONとして解釈できませんでした');
     }
+    validateGeoJSONResponse(data);
+    return data;
+  }
+
+  function validateGeoJSONResponse(data) {
+    const validObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (!validObject(data) || data.type !== 'FeatureCollection' || !Array.isArray(data.features)
+        || (data.metadata !== undefined && !validObject(data.metadata))) {
+      throw new Error('USGS APIの応答が有効な地震GeoJSONではありません');
+    }
+
+    const invalidFeature = data.features.some(feature => {
+      if (!validObject(feature) || feature.type !== 'Feature' || !validObject(feature.properties)
+          || !validObject(feature.geometry) || feature.geometry.type !== 'Point') return true;
+      const coordinates = feature.geometry.coordinates;
+      const properties = feature.properties;
+      return !Array.isArray(coordinates) || coordinates.length < 3
+        || !coordinates.slice(0, 2).every(Number.isFinite)
+        || (coordinates[2] !== null && !Number.isFinite(coordinates[2]))
+        || !Number.isFinite(properties.time)
+        || (properties.mag !== null && !Number.isFinite(properties.mag))
+        || ['place', 'status', 'magType', 'type'].some(key => properties[key] != null && typeof properties[key] !== 'string');
+    });
+    if (invalidFeature) {
+      throw new Error('USGS APIの応答に無効な地震データが含まれています');
+    }
+  }
+
+  function withResultMetadata(data, limit, limitReached = false) {
+    const numericLimit = Number(limit);
+    const hasLimit = Number.isInteger(numericLimit) && numericLimit > 0;
+    return {
+      ...data,
+      metadata: {
+        ...(data.metadata || {}),
+        count: data.features.length,
+        // 上限と同数でも実際に省略されたとは限らないため、可能性だけを通知する。
+        limitReached: limitReached || (hasLimit && data.features.length >= numericLimit),
+      },
+    };
   }
 
   function hasValue(value) {
@@ -141,7 +190,7 @@ const EarthquakeAPI = (() => {
     validateNumberParam(params.minmagnitude, '最小マグニチュード', -10, 10);
     validateNumberParam(params.maxmagnitude, '最大マグニチュード', -10, 10);
     validateNumberParam(params.mindepth, '最小深さ', -100, 1000);
-    validateNumberParam(params.maxdepth, '最大深さ', 0, 1000);
+    validateNumberParam(params.maxdepth, '最大深さ', -100, 1000);
     validateIntegerParam(params.limit, '最大取得件数', 1, 20000);
 
     if (hasValue(params.minmagnitude) && hasValue(params.maxmagnitude)
@@ -153,12 +202,30 @@ const EarthquakeAPI = (() => {
       throw new RangeError('最小深さは最大深さ以下にしてください');
     }
 
+    const rectangleKeys = ['minlat', 'maxlat', 'minlon', 'maxlon'];
+    const hasAnyBounds = rectangleKeys.some(key => hasValue(params[key]));
+    const circleKeys = ['latitude', 'longitude', 'maxradiuskm'];
+    const hasCircle = params.requireCircle || circleKeys.some(key => hasValue(params[key]));
+    if (hasCircle) {
+      if (params.requireBounds || hasAnyBounds || hasValue(params.boundsList)) {
+        throw new RangeError('中心・半径と矩形の地域範囲は同時に指定できません');
+      }
+      if (circleKeys.some(key => !hasValue(params[key]))) {
+        throw new RangeError('中心緯度・中心経度・半径をすべて指定してください');
+      }
+      validateNumberParam(params.latitude, '中心緯度', -90, 90);
+      validateNumberParam(params.longitude, '中心経度', -180, 180);
+      validateNumberParam(params.maxradiuskm, '半径', 0, 20001.6);
+    }
+
+    if (hasValue(params.boundsList) && !Array.isArray(params.boundsList)) {
+      throw new TypeError('地域範囲の一覧が不正です');
+    }
     const boundsList = Array.isArray(params.boundsList) ? params.boundsList : null;
     if (boundsList) {
       if (boundsList.length === 0) throw new RangeError('地域範囲が空です');
       boundsList.forEach((bounds, index) => validateBounds(bounds, `地域範囲${index + 1}`));
     } else {
-      const hasAnyBounds = ['minlat', 'maxlat', 'minlon', 'maxlon'].some(key => hasValue(params[key]));
       if (params.requireBounds || hasAnyBounds) validateBounds(params, 'カスタム範囲');
     }
 
@@ -233,7 +300,7 @@ const EarthquakeAPI = (() => {
       : mergedFeatures;
 
     const base = responses[0] || {};
-    return {
+    const merged = {
       ...base,
       features,
       metadata: {
@@ -241,6 +308,15 @@ const EarthquakeAPI = (() => {
         count: features.length,
       },
     };
+    // 複数リクエストでは先頭レスポンスの範囲・URLは統合結果を表さない。
+    if (responses.length > 1) {
+      delete merged.bbox;
+      delete merged.metadata.url;
+    }
+    const limitReached = responses.some(data => data.metadata?.limitReached
+      || (Number.isFinite(parsedLimit) && parsedLimit > 0 && data.features.length >= parsedLimit))
+      || mergedFeatures.length > features.length;
+    return withResultMetadata(merged, limit, limitReached);
   }
 
   return {
