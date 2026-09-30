@@ -160,6 +160,56 @@ test('a failed manual search does not replace the last successful refresh condit
   assert.equal(h.requests[2].url.href, successfulURL);
 });
 
+test('auto-refresh waits for a pending user search and then refreshes its successful conditions', async t => {
+  for (const mode of ['manual', 'circle', 'quick']) {
+    await t.test(mode, async () => {
+      const h = createApp();
+      h.field('region').value = 'japan';
+      await h.app.executeSearch();
+      h.assertNoError();
+
+      let resolveResponse;
+      h.responses.push(new Promise(resolve => { resolveResponse = resolve; }));
+      h.field('region').value = mode === 'circle' ? 'circle' : 'southeast_asia';
+      if (mode === 'circle') {
+        h.field('circle-latitude').value = '35';
+        h.field('circle-longitude').value = '139';
+        h.field('circle-radius').value = '100';
+      }
+      const pendingSearch = mode === 'quick'
+        ? h.app.quickSearch('365d-7.0')
+        : h.app.executeSearch();
+      const userRequest = h.requests[1];
+
+      try {
+        await h.app.refreshLastSearch();
+        assert.equal(h.requests.length, 2, 'the timer must not enqueue the old search while a user search is pending');
+        assert.equal(userRequest.signal.aborted, false, 'the timer must not cancel the user request');
+      } finally {
+        resolveResponse(jsonResponse([]));
+        await pendingSearch;
+      }
+      h.assertNoError();
+
+      h.advanceTime(60000);
+      await h.app.refreshLastSearch();
+      h.assertNoError();
+      assert.equal(h.requests.length, 3);
+      const refreshed = h.requests[2].url;
+      if (mode === 'quick') {
+        assert.equal(refreshed.searchParams.get('minmagnitude'), '7');
+        assert.equal(refreshed.searchParams.has('minlatitude'), false);
+        assert.equal(
+          Date.parse(refreshed.searchParams.get('endtime')) - Date.parse(userRequest.url.searchParams.get('endtime')),
+          60000
+        );
+      } else {
+        assert.equal(refreshed.href, userRequest.url.href, 'the next timer run must use the new successful criteria');
+      }
+    });
+  }
+});
+
 test('quick auto-refresh rolls its time window forward while preserving the draft mode', async () => {
   const h = createApp();
   await h.app.quickSearch('24h-4.5');

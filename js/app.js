@@ -158,7 +158,8 @@
   }
 
   function refreshLastSearch() {
-    if (!lastSearch) return;
+    // 更新タイマーがユーザーの新しい検索を中断しないようにする。
+    if (!lastSearch || searchRequests.isActive()) return;
     if (lastSearch.type === 'quick') return quickSearch(lastSearch.quick, { updateDraft: false });
     return runManualSearch(lastSearch.params);
   }

@@ -106,6 +106,9 @@ const AppUtils = (() => {
       isCurrent(id) {
         return id === sequence;
       },
+      isActive() {
+        return controller !== null;
+      },
     };
   }
 

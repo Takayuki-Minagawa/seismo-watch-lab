@@ -76,6 +76,20 @@ test('request coordinator invalidates and aborts the previous request', () => {
   assert.equal(second.isCurrent(), true);
 });
 
+test('request coordinator stays active when a superseded request finishes', () => {
+  const coordinator = AppUtils.createRequestCoordinator();
+  assert.equal(coordinator.isActive(), false);
+  const first = coordinator.begin();
+  const second = coordinator.begin();
+  coordinator.finish(first.id);
+  assert.equal(coordinator.isActive(), true);
+  coordinator.finish(second.id);
+  assert.equal(coordinator.isActive(), false);
+  coordinator.begin();
+  coordinator.cancel();
+  assert.equal(coordinator.isActive(), false);
+});
+
 test('text fetch timeout remains active while the response body is being consumed', async () => {
   const context = createBrowserLikeContext({
     fetch: async (_resource, { signal }) => ({
