@@ -1,6 +1,6 @@
 /**
  * waveform.js - IRIS波形ビューアモジュール
- * IRIS FDSN Web Servicesを利用して計器補正済み加速度波形を表示
+ * 波形ヘッダーで加速度単位を確認し、galに換算して表示
  */
 const WaveformViewer = (() => {
   const TIMESERIES_URL = 'https://service.iris.edu/irisws/timeseries/1/query';
@@ -16,7 +16,7 @@ const WaveformViewer = (() => {
     iris: {
       label: 'IRIS / EarthScope',
       region: 'グローバル',
-      stationUrl: 'https://service.iris.edu/fdsnws/station/1/query',
+      stationUrl: 'https://service.earthscope.org/fdsnws/station/1/query',
     },
     geofon: {
       label: 'GEOFON (GFZ)',
@@ -114,6 +114,7 @@ const WaveformViewer = (() => {
     }
 
     if (!resp.ok) {
+      throwIfServiceRetired(resp.status, text);
       if (resp.status === 404) return { stations: [], candidateCount: 0, checkedCount: 0, availableCount: 0 };
       throw new Error(`観測点検索エラー (${dc.label}: HTTP ${resp.status})`);
     }
@@ -134,8 +135,8 @@ const WaveformViewer = (() => {
       return {
         stations: stationData,
         candidateCount: stationData.length,
-        checkedCount: stationData.length,
-        availableCount: stationData.length,
+        checkedCount: 0,
+        availableCount: 0,
       };
     }
 
@@ -202,7 +203,7 @@ const WaveformViewer = (() => {
         dip: parseMaybeFloat(getTableRowValue(row, ['Dip'])),
         sensor: getTableRowValue(row, ['SensorDescription', 'Instrument']),
         scale: getTableRowValue(row, ['Scale']),
-        scaleFreq: getTableRowValue(row, ['ScaleFreq']),
+        scaleFreq: getTableRowValue(row, ['ScaleFrequency', 'ScaleFreq']),
         scaleUnits: getTableRowValue(row, ['ScaleUnits']),
         sampleRate: getTableRowValue(row, ['SampleRate']),
         startTime: getTableRowValue(row, ['StartTime']),
@@ -338,6 +339,7 @@ const WaveformViewer = (() => {
       timeoutMessage: '観測点メタデータ取得がタイムアウトしました',
     });
     if (!resp.ok) {
+      throwIfServiceRetired(resp.status, text);
       if (resp.status === 404) return {};
       throw new Error(`観測点メタデータ取得エラー (HTTP ${resp.status})`);
     }
@@ -534,6 +536,7 @@ const WaveformViewer = (() => {
       };
     } catch (_) {
       if (AppUtils.isAbortError(_)) throw _;
+      if (_?.code === 'SERVICE_RETIRED') throw _;
       return null;
     }
   }
@@ -554,6 +557,7 @@ const WaveformViewer = (() => {
     });
 
     if (!resp.ok) {
+      throwIfServiceRetired(resp.status, text);
       if (resp.status === 404) {
         throw new Error('この観測点・時間帯の波形データは見つかりませんでした');
       }
@@ -569,6 +573,7 @@ const WaveformViewer = (() => {
       filterPreset: options.filterPreset || 'none',
       requestedUnit: 'ACC',
       responseCorrected: true,
+      sourceName: 'IRIS / EarthScope 波形（ヘッダーで加速度単位を確認）',
     });
     setWaveformCache(cacheKey, data);
     return data;
@@ -592,68 +597,106 @@ const WaveformViewer = (() => {
     ].join('|');
   }
 
+  function throwIfServiceRetired(status, text) {
+    if (status === 404 && /(?:timeseries|service|endpoint)/i.test(text)
+        && /(?:retir(?:ed|ement)|discontinued|decommissioned)/i.test(text)) {
+      const error = new Error('データサービスは提供を終了しました。単位を確認できる別の取得元が必要です');
+      error.code = 'SERVICE_RETIRED';
+      throw error;
+    }
+  }
+
   function parseWaveformText(text, context = {}) {
-    const lines = text.trim().split('\n').filter(Boolean);
-    if (lines.length < 2 || !lines[0].startsWith('TIMESERIES')) {
-      throw new Error('IRIS波形データの形式を解釈できませんでした');
+    const lines = String(text).trim().split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (lines.length < 3) {
+      throw new Error('ASCII2波形データの形式を解釈できませんでした');
     }
 
-    const header = lines[0].trim();
-    const seriesIdMatch = header.match(/^TIMESERIES\s+([^,]+),/);
-    const sampleCountMatch = header.match(/,\s*(\d+)\s+samples,/);
-    const sampleRateMatch = header.match(/,\s*([\d.]+)\s+sps,/);
-    const startTimeMatch = header.match(/,\s*([\d-]{4}-\d{2}-\d{2}T[\d:.]+),\s*TSPAIR/);
-    const headerUnit = extractWaveformHeaderUnit(header);
-    const headerSampleType = extractWaveformHeaderSampleType(header);
-    const unitInfo = getAccelerationUnitInfo({
-      reportedUnit: headerUnit,
-      sampleType: headerSampleType,
-      requestedUnit: context.requestedUnit || 'ACC',
-      responseCorrected: Boolean(context.responseCorrected),
-    });
+    const header = lines[0];
+    const fields = header.split(',').map(field => field.trim());
+    const seriesIdMatch = fields[0]?.match(/^TIMESERIES\s+(\S+)$/);
+    const sampleCountMatch = fields[1]?.match(/^([1-9]\d*)\s+samples$/);
+    const sampleRateMatch = fields[2]?.match(/^(\S+)\s+sps$/);
+    const sampleCount = sampleCountMatch ? Number(sampleCountMatch[1]) : NaN;
+    const sampleRate = sampleRateMatch && isNumericToken(sampleRateMatch[1]) ? Number(sampleRateMatch[1]) : NaN;
+    const headerStartTime = fields[3];
+    const startDate = parseIRISTimestamp(headerStartTime);
+    const validStart = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?$/.test(headerStartTime || '')
+      && startDate && startDate.toISOString().slice(0, 19) === headerStartTime.slice(0, 19);
+    if (fields.length !== 7 || !seriesIdMatch || !Number.isSafeInteger(sampleCount) || sampleCount < 2
+        || !Number.isFinite(sampleRate) || sampleRate <= 0 || !validStart || fields[4] !== 'TSPAIR'
+        || !['INTEGER', 'FLOAT', 'DOUBLE', 'REAL'].includes(fields[5])) {
+      throw new Error('ASCII2波形ヘッダーが不正です。サンプル数・周波数・時刻・形式を確認してください');
+    }
+    const identifier = seriesIdMatch[1].split(/[._]/);
+    if (identifier.length < 4 || !identifier[0] || !identifier[1] || !identifier[3]) {
+      throw new Error('ASCII2波形ヘッダーの観測点識別子が不正です');
+    }
+    const station = context.station || {};
+    if (['network', 'station', 'channel'].every(key => typeof station[key] === 'string' && station[key])) {
+      const normalizeCode = value => String(value || '').toUpperCase();
+      const normalizeLocation = value => value === '--' ? '' : normalizeCode(value);
+      if (identifier.length < 4 || normalizeCode(identifier[0]) !== normalizeCode(station.network)
+          || normalizeCode(identifier[1]) !== normalizeCode(station.station)
+          || normalizeLocation(identifier[2]) !== normalizeLocation(station.location)
+          || normalizeCode(identifier[3]) !== normalizeCode(station.channel)) {
+        throw new Error('返却された波形の観測点・チャンネルが要求と一致しません');
+      }
+    }
+    const headerUnit = fields[6];
+    const unitInfo = getAccelerationUnitInfo(headerUnit);
 
     if (!unitInfo) {
       if (normalizeWaveformUnit(headerUnit) === 'COUNTS') {
-        throw new Error('IRIS が COUNTS の生波形を返しました。加速度として扱うには計器特性補正が必要です');
+        throw new Error('COUNTS の波形は加速度単位を確認できないため使用できません。補正要求だけでは物理単位を確定できません');
       }
-      throw new Error(`IRIS が加速度単位として解釈できない波形を返しました (${headerUnit || 'unknown'})`);
+      throw new Error(`波形ヘッダーの加速度単位を確認できません (${headerUnit || 'unknown'})`);
     }
 
     const acc = [];
     const sampleTimes = [];
+    const sampleTimestampTexts = [];
     for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].trim().split(/\s+/);
-      if (parts.length < 2) continue;
-
-      const value = parseFloat(parts[parts.length - 1]);
-      if (!isNaN(value)) {
-        acc.push(value * unitInfo.toGalFactor);
-        sampleTimes.push(parseIRISTimestamp(parts[0]));
+      const parts = lines[i].split(/\s+/);
+      if (parts.length !== 2 || !isNumericToken(parts[1])) {
+        throw new Error(`波形の${i + 1}行目の加速度値が不正です`);
       }
+      const value = Number(parts[1]);
+      const converted = value * unitInfo.toGalFactor;
+      if (!Number.isFinite(value) || !Number.isFinite(converted)) {
+        throw new Error(`波形の${i + 1}行目の加速度値は換算前後とも有限値である必要があります`);
+      }
+      acc.push(converted);
+      sampleTimes.push(parseIRISTimestamp(parts[0]));
+      sampleTimestampTexts.push(parts[0]);
     }
 
-    if (acc.length === 0) {
-      throw new Error('波形サンプルが取得できませんでした');
+    if (acc.length < 2) {
+      throw new Error('波形サンプルは2点以上必要です');
     }
 
-    let dt = sampleRateMatch ? 1 / parseFloat(sampleRateMatch[1]) : null;
-    if (!dt || !isFinite(dt) || dt <= 0) {
-      dt = estimateDtFromDataLines(lines);
-    }
-    if (!dt || !isFinite(dt) || dt <= 0) {
+    const dt = 1 / sampleRate;
+    if (!Number.isFinite(dt) || dt <= 0) {
       throw new Error('サンプリング間隔を特定できませんでした');
     }
 
     const duration = Math.max(0, (acc.length - 1) * dt);
-    const declaredSampleCount = sampleCountMatch ? parseInt(sampleCountMatch[1], 10) : null;
-    const timingQuality = inspectSampleTiming(sampleTimes, dt);
+    if (!Number.isFinite(duration)) {
+      throw new Error('波形の継続時間は有限値である必要があります。サンプリング周波数を確認してください');
+    }
+    const declaredSampleCount = sampleCount;
+    const timingQuality = inspectSampleTiming(sampleTimes, dt, sampleTimestampTexts);
     const sampleCountMismatch = Number.isInteger(declaredSampleCount) && declaredSampleCount !== acc.length;
     const timingIssues = [...timingQuality.issues];
+    const headerTimeMismatch = sampleTimes[0] && (sampleTimes[0].getTime() !== startDate.getTime()
+      || timestampFraction(sampleTimestampTexts[0]).remainder !== timestampFraction(headerStartTime).remainder);
+    if (headerTimeMismatch) {
+      timingIssues.push('ヘッダーの開始日時と先頭サンプルの日時が一致しません');
+    }
     if (sampleCountMismatch) {
       timingIssues.push(`ヘッダー宣言 ${declaredSampleCount} 点に対して ${acc.length} 点を読み込みました`);
     }
-    const station = context.station || {};
-    const stationId = `${station.network || ''}.${station.station || ''}.${station.location || '--'}.${station.channel || ''}`;
+    const stationId = `${identifier[0]}.${identifier[1]}.${identifier[2] || '--'}.${identifier[3]}`;
 
     return {
       acc,
@@ -663,34 +706,53 @@ const WaveformViewer = (() => {
         _dt: dt,
         _duration: duration,
         _maxAcc: AppUtils.maxAbs(acc),
-        _sampleRate: sampleRateMatch ? parseFloat(sampleRateMatch[1]) : 1 / dt,
-        _sampleCountHeader: declaredSampleCount ?? acc.length,
-        _seriesId: seriesIdMatch ? seriesIdMatch[1] : '',
-        _startTime: startTimeMatch ? `${startTimeMatch[1]}Z` : '',
+        _sampleRate: sampleRate,
+        _sampleCountHeader: declaredSampleCount,
+        _seriesId: seriesIdMatch[1],
+        _startTime: headerStartTime.endsWith('Z') ? headerStartTime : `${headerStartTime}Z`,
         _stationId: stationId.replace(/^\.+|\.+$/g, ''),
         _stationName: station.name || '',
         _dataUrl: context.dataUrl || '',
         _plotUrl: context.plotUrl || '',
-        _filterPreset: context.filterPreset || 'none',
-        _filterLabel: getFilterLabel(context.filterPreset),
+        _filterPreset: context.filterPreset || '',
+        _filterLabel: context.filterPreset ? getFilterLabel(context.filterPreset) : 'ファイル記録を参照（未確認）',
         _timeWindowStart: normalizeIRISTimeValue(context.starttime),
         _timeWindowEnd: normalizeIRISTimeValue(context.endtime),
-        _source: buildWaveformSourceLabel(unitInfo),
+        _source: typeof context.sourceName === 'string' && context.sourceName.trim()
+          ? context.sourceName.trim() : '波形ヘッダーで加速度単位を確認',
         _inputUnit: unitInfo.inputLabel,
-        _inputUnitReported: headerUnit || '',
+        _inputUnitReported: headerUnit,
+        _rawHeader: header,
+        _unitVerified: true,
+        _unitEvidence: 'header',
+        _conversionToGal: unitInfo.toGalFactor,
+        _responseCorrectionRequested: context.responseCorrected === true,
         _displayUnit: unitInfo.displayUnit,
-        _hasTimingGap: timingQuality.hasGap || sampleCountMismatch,
+        _hasTimingGap: timingQuality.hasGap || sampleCountMismatch || Boolean(headerTimeMismatch),
         _maxSampleGap: timingQuality.maxGap,
         _timingIssues: timingIssues,
       },
     };
   }
 
-  function inspectSampleTiming(sampleTimes, expectedDt) {
+  function timestampFraction(text = '') {
+    const fraction = text.match(/\.(\d+)/)?.[1] || '';
+    return {
+      remainder: fraction.length > 3 ? Number(`0.${fraction.slice(3)}`) : 0,
+      precisionMs: Math.max(1e-6, 10 ** (3 - fraction.length)),
+    };
+  }
+
+  function inspectSampleTiming(sampleTimes, expectedDt, timestampTexts) {
     let hasGap = false;
     let maxGap = 0;
     const issues = [];
-    const tolerance = Math.max(expectedDt * 0.25, 0.002);
+    const expectedMs = expectedDt * 1000;
+    if (expectedMs < 1) {
+      hasGap = true;
+      issues.push('1000 Hzを超えるサンプリング周波数はブラウザー解析に未対応です');
+    }
+    const fractions = timestampTexts.map(timestampFraction);
 
     const invalidTimestampCount = sampleTimes.filter(time => !(time instanceof Date) || Number.isNaN(time.getTime())).length;
     if (invalidTimestampCount > 0) {
@@ -703,118 +765,102 @@ const WaveformViewer = (() => {
       const current = sampleTimes[index];
       if (!(previous instanceof Date) || Number.isNaN(previous.getTime())
           || !(current instanceof Date) || Number.isNaN(current.getTime())) continue;
-      const gap = (current.getTime() - previous.getTime()) / 1000;
+      // Preserve fractional milliseconds from ASCII2 rather than losing them to Date.
+      const gapMs = current.getTime() - previous.getTime()
+        + fractions[index].remainder - fractions[index - 1].remainder;
+      const gap = gapMs / 1000;
       maxGap = Math.max(maxGap, gap);
-      if (gap <= 0 || Math.abs(gap - expectedDt) > tolerance) {
+      const tolerance = Math.min(expectedMs * 0.25,
+        (fractions[index].precisionMs + fractions[index - 1].precisionMs) / 2) + 1e-7;
+      const first = sampleTimes[0];
+      const offset = first ? current.getTime() - first.getTime()
+        + fractions[index].remainder - fractions[0].remainder : NaN;
+      const gridTolerance = Math.min(expectedMs * 0.25,
+        (fractions[index].precisionMs + fractions[0].precisionMs) / 2) + 1e-7;
+      if (gap <= 0 || Math.abs(gapMs - expectedMs) > tolerance
+          || (Number.isFinite(offset) && Math.abs(offset - index * expectedMs) > gridTolerance)) {
         hasGap = true;
-        if (issues.length === 0) issues.push('サンプル時刻の不連続を検出しました');
+        if (issues.length === 0) issues.push('サンプル時刻の不連続または時刻精度の不足を検出しました');
       }
     }
 
     return { hasGap, maxGap, issues };
   }
 
-  function extractWaveformHeaderUnit(header = '') {
-    const parts = header.split(',').map(part => part.trim()).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : '';
-  }
-
-  function extractWaveformHeaderSampleType(header = '') {
-    const parts = header.split(',').map(part => part.trim()).filter(Boolean);
-    return parts.length > 1 ? parts[parts.length - 2] : '';
-  }
-
   function normalizeWaveformUnit(unit = '') {
-    return unit.toUpperCase().replace(/\s+/g, '');
+    return typeof unit === 'string'
+      ? unit.replace(/[µμ]/g, 'u').replace(/²/g, '2').toUpperCase().replace(/\s+/g, '')
+      : '';
   }
 
-  function normalizeWaveformSampleType(sampleType = '') {
-    return sampleType.toUpperCase().replace(/\s+/g, '');
+  function isNumericToken(value) {
+    return typeof value === 'string' && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value);
   }
 
-  function isFloatWaveformSampleType(sampleType = '') {
-    return ['FLOAT', 'DOUBLE', 'REAL'].includes(sampleType);
-  }
-
-  function getAccelerationUnitInfo({
-    reportedUnit = '',
-    sampleType = '',
-    requestedUnit = 'ACC',
-    responseCorrected = false,
-  } = {}) {
+  // Return a conversion only for explicitly identified physical acceleration units.
+  // Request flags and sample representation never establish the returned unit.
+  function getAccelerationUnitInfo(unitOrOptions = '') {
+    const reportedUnit = typeof unitOrOptions === 'string' ? unitOrOptions : unitOrOptions?.reportedUnit;
     const normalized = normalizeWaveformUnit(reportedUnit);
-    const normalizedSampleType = normalizeWaveformSampleType(sampleType);
 
     if (normalized === 'GAL') {
-      return {
-        toGalFactor: 1,
-        displayUnit: 'gal',
-        inputLabel: 'gal',
-        inferredFromRequest: false,
-      };
+      return { toGalFactor: 1, displayUnit: 'gal', inputLabel: 'gal' };
+    }
+    const gravityUnits = {
+      G: { factor: 980.665, label: 'g' },
+      MG: { factor: 0.980665, label: 'mg' },
+      UG: { factor: 0.000980665, label: 'µg' },
+    };
+    if (Object.prototype.hasOwnProperty.call(gravityUnits, normalized)) {
+      const unit = gravityUnits[normalized];
+      return { toGalFactor: unit.factor, displayUnit: 'gal', inputLabel: unit.label };
     }
 
     const match = normalized.match(/^([A-Z]+)\/(?:(?:S|SEC)(?:\*\*2|\^2|2)|(?:S|SEC)\/(?:S|SEC))$/);
     if (match) {
-      const factorByPrefix = {
-        M: 100,
-        CM: 1,
-        MM: 0.1,
-        UM: 0.0001,
-        NM: 0.0000001,
+      const unitByPrefix = {
+        M: { factor: 100, label: 'm/s²' },
+        CM: { factor: 1, label: 'cm/s²' },
+        MM: { factor: 0.1, label: 'mm/s²' },
+        UM: { factor: 0.0001, label: 'µm/s²' },
+        NM: { factor: 0.0000001, label: 'nm/s²' },
       };
-
-      const toGalFactor = factorByPrefix[match[1]];
-      if (!toGalFactor) return null;
-
-      return {
-        toGalFactor,
-        displayUnit: 'gal',
-        inputLabel: reportedUnit,
-        inferredFromRequest: false,
-      };
-    }
-
-    if (
-      normalized === 'COUNTS'
-      && responseCorrected
-      && requestedUnit === 'ACC'
-      && isFloatWaveformSampleType(normalizedSampleType)
-    ) {
-      return {
-        toGalFactor: 100,
-        displayUnit: 'gal',
-        inputLabel: 'm/s^2 (ACC request; header reported COUNTS)',
-        inferredFromRequest: true,
-      };
+      const unit = unitByPrefix[match[1]];
+      if (unit) return { toGalFactor: unit.factor, displayUnit: 'gal', inputLabel: unit.label };
     }
 
     return null;
   }
 
-  function buildWaveformSourceLabel(unitInfo) {
-    if (unitInfo.inferredFromRequest) {
-      return 'IRIS 計器補正済み加速度 (correct=true, units=ACC / ヘッダー単位: COUNTS)';
+  /** Return true for finite gal data with consistent header-unit evidence; otherwise throw. */
+  function validateAccelerationData(data) {
+    const meta = data?.meta;
+    const unitInfo = getAccelerationUnitInfo(meta?._inputUnitReported);
+    if (!meta || meta._unitVerified !== true || meta._unitEvidence !== 'header'
+        || meta._displayUnit !== 'gal' || !unitInfo
+        || meta._inputUnit !== unitInfo.inputLabel || meta._conversionToGal !== unitInfo.toGalFactor) {
+      throw new TypeError('波形の加速度単位とgalへの換算根拠を確認できません');
     }
-
-    return 'IRIS 計器補正済み加速度';
-  }
-
-  function estimateDtFromDataLines(lines) {
-    if (lines.length < 3) return null;
-
-    const first = parseIRISTimestamp(lines[1].trim().split(/\s+/)[0]);
-    const second = parseIRISTimestamp(lines[2].trim().split(/\s+/)[0]);
-    if (!first || !second) return null;
-
-    return (second.getTime() - first.getTime()) / 1000;
+    if (!data.acc || !Number.isSafeInteger(data.acc.length) || data.acc.length < 2) {
+      throw new TypeError('加速度波形は2点以上必要です');
+    }
+    if (!Number.isFinite(data.dt) || data.dt <= 0) {
+      throw new RangeError('サンプリング間隔は正の有限値である必要があります');
+    }
+    for (let index = 0; index < data.acc.length; index++) {
+      if (!Number.isFinite(data.acc[index])) {
+        throw new TypeError(`加速度波形の${index + 1}点目が有限値ではありません`);
+      }
+    }
+    return true;
   }
 
   function parseIRISTimestamp(value) {
-    if (!value) return null;
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?$/.test(value)) return null;
     const normalized = /Z$/.test(value) ? value : `${value}Z`;
     const date = new Date(normalized);
-    return isNaN(date.getTime()) ? null : date;
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 19) !== value.slice(0, 19)) return null;
+    return date;
   }
 
   /**
@@ -934,11 +980,18 @@ const WaveformViewer = (() => {
         <span>フィルタ: ${escapeHtml(data.meta._filterLabel || 'なし')}</span>
       </div>
       <div class="waveform-info">
-        <span>${escapeHtml(data.meta._source)} / 返却ヘッダー: ${escapeHtml(data.meta._inputUnitReported || '?')} / 解析単位: ${escapeHtml(data.meta._inputUnit || '?')} / 表示単位: ${escapeHtml(data.meta._displayUnit || 'gal')}</span>
+        <span>${escapeHtml(data.meta._source)} / 入力単位: ${escapeHtml(data.meta._inputUnitReported || '?')} / 表示単位: ${escapeHtml(data.meta._displayUnit || 'gal')}</span>
+        <span>換算: 入力値 (${escapeHtml(data.meta._inputUnit || '?')}) × ${escapeHtml(data.meta._conversionToGal ?? '?')} = gal</span>
+        <span>元ヘッダー: ${escapeHtml(data.meta._rawHeader || '不明')}</span>
+        <span>ヘッダーの単位表記を確認しています。計器補正・校正の実施や精度を検証したものではありません。</span>
         <span>
           ${sourceLinks}
         </span>
       </div>
+      ${data.meta._hasTimingGap ? `<div class="waveform-error" role="status">
+        時刻不連続・精度不足または未対応サンプリングを検出したため、応答スペクトルは計算できません。横軸はヘッダーのサンプリング間隔で表示しています。
+        <ul>${(data.meta._timingIssues || []).map(issue => `<li>${escapeHtml(issue)}</li>`).join('')}</ul>
+      </div>` : ''}
     `;
 
     const canvas = document.getElementById(canvasId);
@@ -973,7 +1026,7 @@ const WaveformViewer = (() => {
         plugins: {
           title: {
             display: true,
-            text: 'IRIS 計器補正済み加速度波形',
+            text: '加速度波形 (gal)',
           },
           legend: {
             display: false,
@@ -1030,7 +1083,7 @@ const WaveformViewer = (() => {
     if (!container) return null;
 
     container.innerHTML = `
-      <div class="waveform-loading">IRIS から計器補正済み加速度波形を取得中...</div>
+      <div class="waveform-loading">波形を取得し、ヘッダーの加速度単位を確認中...</div>
     `;
 
     const data = await fetchWaveformData(station, starttime, endtime, options);
@@ -1051,7 +1104,7 @@ const WaveformViewer = (() => {
 
     container.innerHTML = `
       <div class="waveform-placeholder">
-        地震を選択し、観測点を検索してから波形を表示してください
+        加速度単位が明記されたASCII2波形ファイルを読み込んでください
       </div>
     `;
   }
@@ -1102,6 +1155,8 @@ const WaveformViewer = (() => {
     sliceWaveformData,
     normalizeRange,
     parseWaveformText,
+    getAccelerationUnitInfo,
+    validateAccelerationData,
     channelPriority,
     getWaveformDataURL,
     getWaveformImageURL,

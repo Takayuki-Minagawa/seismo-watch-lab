@@ -3,7 +3,7 @@
  * アプリシェルのキャッシュとオフライン対応
  */
 const CACHE_PREFIX = 'seismo-watch-';
-const CACHE_NAME = `${CACHE_PREFIX}v5`;
+const CACHE_NAME = `${CACHE_PREFIX}v6`;
 const APP_SHELL = [
   './',
   './index.html',

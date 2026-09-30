@@ -17,6 +17,7 @@
   let currentSpectrumResult = null;
   let spectrumCalculationSeq = 0;
   let currentWaveformData = null;
+  let waveformInputMode = null; // file は観測点検索・選択と独立した入力
   let currentWaveformView = { start: 0, end: null };
   const PAGE_SIZE = 50;
   const searchRequests = AppUtils.createRequestCoordinator();
@@ -564,6 +565,7 @@
     const radiusSel = $('#waveform-radius');
 
     resetWaveformViewerState();
+    $('#waveform-file')?.addEventListener('change', importWaveformFile);
 
     stationSel.addEventListener('change', onWaveformStationSelectionChange);
     filterSel.addEventListener('change', () => handleStationSearchCriteriaChange('フィルタ'));
@@ -583,18 +585,18 @@
       const filterPreset = filterSel.value;
       const timeWindow = WaveformViewer.getTimeWindow(selectedFeature);
 
-      invalidateLoadedWaveform();
+      invalidateWaveformForStationChange();
       stationInfoRequests.cancel();
       resetWaveformStationDetail();
       stationSel.innerHTML = '<option value="">-- 観測点を検索中 --</option>';
       btnShow.disabled = true;
       const stationSummary = $('#waveform-station-summary');
       if (stationSummary) {
-        stationSummary.innerHTML = '<p class="station-summary-message">観測点と波形取得可否を確認中です...</p>';
+        stationSummary.innerHTML = '<p class="station-summary-message">観測点メタデータを検索中です...</p>';
         stationSummary.classList.remove('hidden');
       }
       btnSearch.disabled = true;
-      btnSearch.textContent = '検索・確認中...';
+      btnSearch.textContent = '検索中...';
       const request = stationSearchRequests.begin();
 
       try {
@@ -604,7 +606,7 @@
           radius,
           selectedFeature.properties.time,
           {
-            requireWaveform: true,
+            requireWaveform: false,
             starttime: timeWindow.starttime,
             endtime: timeWindow.endtime,
             filterPreset,
@@ -635,12 +637,8 @@
 
         if (result.candidateCount === 0) {
           Settings.showToast(`${dcLabel}: 周辺に観測点が見つかりませんでした。検索半径やデータセンターを変更してください。`);
-        } else if (result.availableCount === 0) {
-          Settings.showToast(`${dcLabel}: 候補 ${result.candidateCount} 件中、近傍 ${result.checkedCount} チャンネルを確認しましたが波形を取得できませんでした`);
-        } else if (result.availableCount !== result.checkedCount) {
-          Settings.showToast(`${dcLabel}: 近傍 ${result.checkedCount} チャンネル中 ${result.availableCount} チャンネルがIRIS経由で波形取得可能`);
         } else {
-          Settings.showToast(`${dcLabel}: ${result.availableCount} チャンネルが見つかりました`);
+          Settings.showToast(`${dcLabel}: 観測点 ${result.stations.length} チャンネルのメタデータが見つかりました（波形の取得可否は未確認）`);
         }
       } catch (err) {
         if (request.isCurrent() && !AppUtils.isAbortError(err)) {
@@ -672,6 +670,7 @@
 
       const station = JSON.parse(stationSel.value);
       const timeWindow = WaveformViewer.getTimeWindow(selectedFeature);
+      waveformInputMode = 'remote';
       const requestedStationKey = station.stationKey;
       const requestedFilter = filterSel.value;
       btnShow.disabled = true;
@@ -699,8 +698,8 @@
         };
         setWaveformViewControlsEnabled(true, currentWaveformView.end);
         updateWaveformViewInputs(currentWaveformView.start, currentWaveformView.end);
-        syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
-        Settings.showToast('IRIS 計器補正済み波形を取得しました');
+        syncWaveformToSpectrum();
+        Settings.showToast('ヘッダーの加速度単位を確認し、galへ換算しました');
       } catch (err) {
         if (!request.isCurrent() || AppUtils.isAbortError(err)) return;
         currentWaveformData = null;
@@ -731,7 +730,7 @@
         WaveformViewer.renderWaveform(currentWaveformData, 'waveform-display', range);
         currentWaveformView = range;
         updateWaveformViewInputs(range.start, range.end);
-        syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
+        syncWaveformToSpectrum();
       } catch (err) {
         Settings.showToast(err.message);
       }
@@ -745,7 +744,7 @@
       };
       updateWaveformViewInputs(currentWaveformView.start, currentWaveformView.end);
       WaveformViewer.renderWaveform(currentWaveformData, 'waveform-display', currentWaveformView);
-      syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
+      syncWaveformToSpectrum();
     });
 
     btnSpectrum.addEventListener('click', () => {
@@ -754,13 +753,47 @@
         return;
       }
 
-      syncWaveformToSpectrum('IRIS 計器補正済み加速度波形');
+      syncWaveformToSpectrum();
       activateTab('spectrum', { moveFocus: true });
       calculateSpectrumForLoadedData();
     });
   }
 
+  async function importWaveformFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    // 読込開始時に旧波形・旧計算結果を無効化し、遅い読込が後の操作を上書きしないようにする。
+    invalidateLoadedWaveform();
+    waveformInputMode = 'file';
+    const request = waveformRequests.begin();
+    const status = $('#waveform-import-status');
+    if (status) status.textContent = `${file.name} を読み込み中...`;
+    try {
+      if (file.size > 20 * 1024 * 1024) throw new Error('ファイルは20 MiB以下にしてください');
+      const text = await file.text();
+      if (!request.isCurrent()) return;
+      const data = WaveformViewer.parseWaveformText(text, { sourceName: `ローカルファイル: ${file.name}` });
+      WaveformViewer.validateAccelerationData(data);
+      currentWaveformData = data;
+      currentWaveformView = { start: 0, end: data.meta._duration };
+      WaveformViewer.renderWaveform(data, 'waveform-display');
+      updateWaveformViewInputs(0, data.meta._duration);
+      setWaveformViewControlsEnabled(true, data.meta._duration);
+      syncWaveformToSpectrum();
+      if (status) status.textContent = `${file.name}: ${data.meta._npts}点 / ヘッダー単位 ${data.meta._inputUnitReported} → gal。計器補正の内容は作成元の処理記録で確認してください。`;
+    } catch (err) {
+      if (!request.isCurrent()) return;
+      invalidateLoadedWaveform();
+      if (status) status.textContent = `読込エラー: ${err.message}`;
+      Settings.showToast(`波形読込エラー: ${err.message}`);
+    } finally {
+      waveformRequests.finish(request.id);
+      event.target.value = '';
+    }
+  }
+
   function setSpectrumInput(data, sourceLabel = '', displayData = data) {
+    WaveformViewer.validateAccelerationData(data);
     spectrumInputData = data;
     currentSpectrumResult = null;
     spectrumCalculationSeq += 1;
@@ -790,7 +823,10 @@
     parts.push(`データ点数: ${meta._npts}`);
     parts.push(`サンプリング間隔: ${meta._dt.toFixed(4)}秒`);
     parts.push(`継続時間: ${meta._duration.toFixed(1)}秒`);
-    parts.push(`最大加速度: ${meta._maxAcc.toFixed(2)} ${meta._displayUnit || 'gal'}`);
+    parts.push(`最大加速度: ${meta._maxAcc.toFixed(2)} gal`);
+    parts.push(`単位根拠: ヘッダー ${escapeHtml(meta._inputUnitReported || '')} / 値 × ${meta._conversionToGal} → gal`);
+    parts.push('計器補正・校正の正しさは未検証');
+    if (meta._startTime) parts.push(`記録開始 (UTC): ${escapeHtml(meta._startTime)}`);
 
     if (meta['Station Code']) parts.push(`観測点: ${escapeHtml(meta['Station Code'])}`);
     if (meta['Dir.']) parts.push(`成分: ${escapeHtml(meta['Dir.'])}`);
@@ -808,7 +844,14 @@
 
   function calculateSpectrumForLoadedData() {
     if (!spectrumInputData) {
-      Settings.showToast('先に検索結果から地震を選び、波形ビューアで波形を表示してください');
+      Settings.showToast('先に波形ビューアで加速度波形ファイルを読み込んでください');
+      return;
+    }
+    try {
+      WaveformViewer.validateAccelerationData(spectrumInputData);
+    } catch (err) {
+      resetSpectrumState();
+      Settings.showToast(`単位・データ検証エラー: ${err.message}`);
       return;
     }
     if (spectrumInputData.meta?._hasTimingGap) {
@@ -849,6 +892,7 @@
         if (calculationSeq !== spectrumCalculationSeq) return;
 
         const type = $('#spectrum-type').value;
+        result.meta.waveform = { ...inputData.meta };
         currentSpectrumResult = result;
         Spectrum.renderSpectrum(result, 'chart-spectrum', type);
         renderSpectrumSummary(result, type);
@@ -890,7 +934,7 @@
     `;
   }
 
-  function syncWaveformToSpectrum(sourceLabel = 'IRIS 計器補正済み加速度波形') {
+  function syncWaveformToSpectrum(sourceLabel = '') {
     if (!currentWaveformData) return null;
 
     const displayData = WaveformViewer.sliceWaveformData(
@@ -907,7 +951,7 @@
         _sourceDuration: currentWaveformData.meta._duration,
       },
     };
-    setSpectrumInput(spectrumData, sourceLabel, displayData);
+    setSpectrumInput(spectrumData, sourceLabel || currentWaveformData.meta._source, displayData);
     return spectrumData;
   }
 
@@ -945,6 +989,9 @@
         const el = $(selector);
         if (el) el.disabled = !enabled;
       });
+
+    const spectrumButton = $('#btn-waveform-spectrum');
+    if (spectrumButton && enabled) spectrumButton.disabled = Boolean(currentWaveformData?.meta?._hasTimingGap);
 
     const endInput = $('#waveform-view-end');
     if (endInput) {
@@ -985,11 +1032,18 @@
 
     resetWaveformStationDetail();
 
-    invalidateLoadedWaveform();
+    invalidateWaveformForStationChange();
+  }
+
+  function invalidateWaveformForStationChange() {
+    if (waveformInputMode !== 'file') invalidateLoadedWaveform();
   }
 
   function invalidateLoadedWaveform() {
     waveformRequests.cancel();
+    waveformInputMode = null;
+    const status = $('#waveform-import-status');
+    if (status) status.textContent = '';
     currentWaveformData = null;
     currentWaveformView = { start: 0, end: null };
     updateWaveformViewInputs(0, 0);
@@ -1007,7 +1061,7 @@
   function handleStationSearchCriteriaChange(criteriaLabel) {
     stationSearchRequests.cancel();
     stationInfoRequests.cancel();
-    invalidateLoadedWaveform();
+    invalidateWaveformForStationChange();
 
     const stationSel = $('#waveform-station');
     if (stationSel) {
@@ -1044,7 +1098,7 @@
     const info = $('#spectrum-info');
     if (info) {
       info.style.display = '';
-      info.innerHTML = '検索結果から地震を選択し、波形ビューアで計器補正済み加速度波形を表示すると、ここに応答スペクトル入力情報が表示されます。';
+      info.innerHTML = '波形ビューアで単位付き加速度ファイルを読み込むと、ここに入力単位・換算・観測点の情報が表示されます。';
     }
   }
 
@@ -1075,23 +1129,21 @@
 
     const rows = stations.map((station, index) => {
       const dist = Number.isFinite(station.distanceKm) ? `${station.distanceKm.toFixed(1)} km` : '-- km';
-      const maxAcc = Number.isFinite(station.previewMaxAcc) ? `${station.previewMaxAcc.toFixed(2)} ${station.previewUnit || 'gal'}` : '--';
       return `
         <tr data-station-key="${escapeHtml(station.stationKey)}">
           <td>${index + 1}</td>
           <td class="station-summary-code">${escapeHtml(station.stationKey)}</td>
           <td>${dist}</td>
-          <td>${maxAcc}</td>
         </tr>
       `;
     }).join('');
 
-    const dcInfo = dcLabel ? ` <span style="font-size:0.8rem; color:var(--text-secondary);">(観測点検索: ${escapeHtml(dcLabel)} / 波形取得: IRIS)</span>` : '';
+    const dcInfo = dcLabel ? ` <span style="font-size:0.8rem; color:var(--text-secondary);">(メタデータ提供元: ${escapeHtml(dcLabel)})</span>` : '';
 
     container.innerHTML = `
       <div class="station-summary-header">
         <strong>観測点候補</strong>
-        <span>全候補 ${candidateCount} 件 / 確認 ${checkedCount} 件 / 取得可能 ${availableCount} 件${dcInfo}</span>
+        <span>${candidateCount} チャンネル / 波形の取得可否は未確認${dcInfo}</span>
       </div>
       <div class="station-summary-table-wrap">
         <table class="station-summary-table">
@@ -1100,7 +1152,6 @@
               <th>#</th>
               <th>観測点</th>
               <th>距離</th>
-              <th>最大加速度</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -1138,7 +1189,7 @@
   }
 
   function onWaveformStationSelectionChange() {
-    invalidateLoadedWaveform();
+    invalidateWaveformForStationChange();
     handleWaveformStationSelectionChange();
   }
 
@@ -1266,9 +1317,9 @@
       ['Azimuth', channelRow.Azimuth],
       ['Dip', channelRow.Dip],
       ['SensorDescription', channelRow.SensorDescription || channelRow.Instrument],
-      ['Scale', channelRow.Scale],
-      ['ScaleFreq', channelRow.ScaleFreq],
-      ['ScaleUnits', channelRow.ScaleUnits],
+      ['総合感度 (Scale)', channelRow.Scale],
+      ['感度の基準周波数 (Hz)', channelRow.ScaleFrequency || channelRow.ScaleFreq],
+      ['感度の入力物理単位 (ScaleUnits)', channelRow.ScaleUnits],
       ['SampleRate', channelRow.SampleRate],
       ['StartTime', channelRow.StartTime],
       ['EndTime', channelRow.EndTime],
@@ -1280,7 +1331,7 @@
           <strong>観測点公開メタデータ</strong>
           <span>${escapeHtml(titleCode)}</span>
         </div>
-        <span class="station-detail-status">${escapeHtml(siteName || info.datacenterLabel || 'FDSN Station metadata')}</span>
+        <span class="station-detail-status">メタデータ提供元: ${escapeHtml(info.datacenterLabel || 'FDSN Station metadata')}</span>
       </div>
       <div class="station-detail-grid">
         ${buildWaveformStationDetailSection('Site / Station', siteItems)}
@@ -1317,12 +1368,8 @@
   }
 
   function buildWaveformStationMeasurementNote(channelRow = {}) {
-    const scaleUnits = String(channelRow.ScaleUnits || '').trim();
-    if (scaleUnits.toLowerCase() === 'm/s') {
-      return 'この観測点の感度定義は m/s で、元の計器は速度系です。ただし、このアプリの波形グラフは correct=true&units=ACC で EarthScope / IRIS が返した加速度を gal 表示したもので、ブラウザ側で速度波形を微分していません。';
-    }
-
-    return 'このアプリの波形グラフは correct=true&units=ACC で EarthScope / IRIS が返した加速度を gal 表示したもので、ブラウザ側で数値微分はしていません。';
+    const scaleUnits = String(channelRow.ScaleUnits || '').trim() || '未記載';
+    return `ScaleUnits=${scaleUnits} は計器の総合感度に対応する入力物理単位で、読込波形の単位とは別です。Scaleは基準周波数での感度であり、これだけで周波数特性・位相を含む計器補正はできません。補正済み加速度にScaleを再適用しないでください。この公開StationXMLが読み込んだ波形の補正に使われたかは、ファイル作成元の処理記録で確認してください。`;
   }
 
   function selectFeatureForWaveform(feature) {
