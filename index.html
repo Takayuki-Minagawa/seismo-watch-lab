@@ -291,12 +291,18 @@
 
       <!-- 波形ビューアタブ -->
       <div class="tab-content hidden" id="tab-waveform" role="tabpanel" aria-labelledby="tab-btn-waveform" aria-hidden="true">
-        <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          複数のFDSNデータセンター（IRIS、GEOFON、GeoNet等）から観測点を検索し、IRIS (EarthScope) のデータサービスで計器補正済み加速度波形を取得します。
-          既定の生ダウンロード値は COUNTS のため、このビューアでは <code>correct=true&amp;units=ACC</code> を指定して物理単位へ変換した波形を利用します。
-          <strong>波形データの取得は常に IRIS 経由で行われます（他DCで見つかった観測点も、IRISの連携データで取得を試みます）。</strong>
-          結果テーブルの行をクリックして地震を選択してください。
-        </p>
+        <div class="waveform-service-notice" role="note">
+          <strong>IRISの数値波形変換サービスは2026年8月26日に提供を終了しました。</strong>
+          <p>観測点検索と公開メタデータの確認は引き続き利用できます。波形は、計器補正を行い加速度単位を明記したASCII2ファイルを読み込んでください。</p>
+          <a href="https://www.earthscope.org/news/retirement-of-the-irisws-timeseries-web-service/" target="_blank" rel="noopener">EarthScopeの公式告知</a>
+          · <a href="https://github.com/Takayuki-Minagawa/seismo-watch-lab/blob/main/docs/waveform-units.md" target="_blank" rel="noopener">ObsPy補正・ファイル作成手順</a>
+        </div>
+        <div class="waveform-import">
+          <label for="waveform-file"><strong>加速度波形ファイル（ASCII2）</strong></label>
+          <input type="file" id="waveform-file" accept=".txt,.ascii,.ascii2" aria-describedby="waveform-import-help">
+          <p id="waveform-import-help">ヘッダーの明示単位をgalへ換算します（1 m/s² = 100 gal）。COUNTS・速度・変位・単位不明のデータは読み込みません。ヘッダー表記の確認は、計器補正や校正の正しさを保証するものではありません。ファイルは端末内で処理します（上限20 MiB）。</p>
+          <div id="waveform-import-status" role="status" aria-live="polite"></div>
+        </div>
         <div class="waveform-controls">
           <div class="form-group">
             <label for="waveform-eq-label">選択中の地震</label>
@@ -325,8 +331,8 @@
               <option value="20">20°</option>
             </select>
           </div>
-          <div class="form-group">
-            <label for="waveform-filter">フィルタ</label>
+          <div class="form-group hidden" aria-hidden="true">
+            <label for="waveform-filter">旧サービスのフィルタ</label>
             <select id="waveform-filter">
               <option value="none" selected>なし (demean)</option>
               <option value="lp-1">Low-pass 1 Hz</option>
@@ -345,9 +351,9 @@
               <option value="">-- 先に観測点を検索 --</option>
             </select>
           </div>
-          <div class="form-group">
+          <div class="form-group hidden" aria-hidden="true">
             <label>&nbsp;</label>
-            <button class="btn btn-sm btn-accent" id="btn-show-waveform">波形を表示</button>
+            <button class="btn btn-sm btn-accent" id="btn-show-waveform" disabled>旧サービス（提供終了）</button>
           </div>
           <div class="form-group">
             <label for="waveform-view-start">表示開始 (秒)</label>
@@ -374,7 +380,7 @@
         <div class="station-detail hidden" id="waveform-station-detail"></div>
         <div class="waveform-display" id="waveform-display">
           <div class="waveform-placeholder">
-            地震を選択し、観測点を検索してから波形を表示してください
+            単位を明記した加速度波形ファイルを読み込んでください
           </div>
         </div>
       </div>
@@ -382,8 +388,8 @@
       <!-- 応答スペクトルタブ -->
       <div class="tab-content hidden" id="tab-spectrum" role="tabpanel" aria-labelledby="tab-btn-spectrum" aria-hidden="true">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          検索結果から地震を選択し、波形ビューアで取得した IRIS 計器補正済み加速度波形から応答スペクトルを計算します。
-          この画面でのファイル読込は行いません。
+          波形ビューアに読み込んだ、加速度単位が明示された波形から応答スペクトルを計算します。
+          入力はgal（cm/s²）へ換算済みです。欠測・時刻不連続・単位不明の波形は計算できません。
         </p>
         <div class="spectrum-controls">
           <div class="form-group">
@@ -521,7 +527,7 @@
           <h4>データ出典</h4>
           <p>
             地震データ: <a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener">USGS (U.S. Geological Survey)</a> - パブリックドメイン<br>
-            波形データ: <a href="https://service.iris.edu/" target="_blank" rel="noopener">IRIS / NSF SAGE</a><br>
+            観測点情報: <a href="https://service.earthscope.org/" target="_blank" rel="noopener">EarthScope / FDSN</a>、波形: 読み込んだファイルの出典を参照<br>
             地図タイル: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors (ODbL)<br>
             地図ライブラリ: <a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet</a> (BSD-2-Clause) / グラフ: <a href="https://www.chartjs.org/" target="_blank" rel="noopener">Chart.js</a> (MIT)
           </p>

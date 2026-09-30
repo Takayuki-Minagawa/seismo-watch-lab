@@ -1601,3 +1601,20 @@ a:hover {
     flex-direction: column;
   }
 }
+
+/* 単位・提供状況を波形の取得操作より先に表示する */
+.waveform-service-notice, .waveform-import {
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 0.85rem;
+  line-height: 1.7;
+}
+.waveform-service-notice p, .waveform-import p { margin: 0.35rem 0; }
+.waveform-import input { display: block; margin: 0.6rem 0; max-width: 100%; }
+#waveform-import-status { overflow-wrap: anywhere; }
+
+.waveform-controls .form-group.hidden { display: none; }
+.waveform-info { overflow-wrap: anywhere; }

@@ -19,3 +19,8 @@ package-lock.json
 
 # Logs
 *.log
+
+# Optional local waveform preparation
+.venv-waveform/
+__pycache__/
+*.pyc

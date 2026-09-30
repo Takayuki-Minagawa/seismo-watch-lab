@@ -20,6 +20,10 @@ function createElement(id) {
       if (!listeners.has(type)) listeners.set(type, []);
       listeners.get(type).push(listener);
     },
+    async change(files) {
+      this.files = files;
+      for (const listener of listeners.get('change') || []) await listener({ target: this });
+    },
     async click() {
       for (const listener of listeners.get('click') || []) await listener({ target: this });
     },
@@ -63,6 +67,7 @@ function loadWaveformApp() {
   const exposedSource = appSource.replace(startup, `
     globalThis.waveformAppTest = {
       initWaveformViewer,
+      calculateSpectrumForLoadedData,
       seed(data, result) {
         selectedFeature = {
           properties: { time: Date.UTC(2026, 0, 1), mag: 5 },
@@ -88,6 +93,8 @@ function loadWaveformApp() {
     meta: {
       _dt: 0.06, _npts: 6, _duration: 0.30, _maxAcc: 999,
       _displayUnit: 'gal', _stationId: 'XX.TEST.--.HNN',
+      _unitVerified: true, _unitEvidence: 'header', _inputUnit: 'gal',
+      _inputUnitReported: 'GAL', _conversionToGal: 1,
     },
   };
   const result = Spectrum.computeSpectrum(data.acc, data.dt, { periodCount: 5 });
@@ -163,4 +170,78 @@ test('a failed waveform reload clears stale spectrum data, charts, and download 
   assert.equal(element('btn-download-spectrum').disabled, true);
   assert.equal(element('spectrum-summary').innerHTML, '');
   assert.match(toasts.at(-1), /fixture network failure/);
+});
+
+const accelerationFile = (unit = 'M/S**2', values = [0.1, -0.2, 0.3]) => ({
+  name: 'observation.txt', size: 200,
+  text: async () => `TIMESERIES XX.FILE.--.HNE.M, 3 samples, 100 sps, 2026-01-01T00:00:00.000, TSPAIR, FLOAT, ${unit}\n${values.map((value, i) => `2026-01-01T00:00:00.0${i}0 ${value}`).join('\n')}`,
+});
+
+test('file import verifies explicit acceleration units, clears prior results and preserves provenance in spectra', async () => {
+  const { app, element } = loadWaveformApp();
+  await element('waveform-file').change([accelerationFile()]);
+  assert.deepEqual(Array.from(app.state().currentWaveformData.acc), [10, -20, 30]);
+  assert.equal(app.state().currentSpectrumResult, null);
+  assert.equal(element('btn-download-spectrum').disabled, true);
+  assert.equal(element('btn-calc-spectrum').disabled, false);
+  assert.match(element('spectrum-info').innerHTML, /M\/S\*\*2.*100.*gal/);
+  assert.match(element('waveform-import-status').textContent, /計器補正/);
+  element('spectrum-damping').value = '5';
+  element('spectrum-type').value = 'sa';
+  app.calculateSpectrumForLoadedData();
+  await new Promise(resolve => setTimeout(resolve, 70));
+  const result = app.state().currentSpectrumResult;
+  assert.equal(result.meta.pga, 30);
+  assert.equal(result.meta.waveform._stationId, 'XX.FILE.--.HNE');
+  assert.equal(result.meta.waveform._conversionToGal, 100);
+  assert.equal(result.meta.waveform._inputUnitReported, 'M/S**2');
+  assert.equal(result.meta.waveform._responseCorrectionRequested, false);
+});
+
+test('unknown-unit file import removes stale data and blocks spectrum export', async () => {
+  const { app, element, charts } = loadWaveformApp();
+  await element('waveform-file').change([accelerationFile('COUNTS')]);
+  assert.equal(app.state().currentWaveformData, null);
+  assert.equal(app.state().spectrumInputData, null);
+  assert.equal(app.state().currentSpectrumResult, null);
+  assert.ok(charts.every(chart => chart.destroyed));
+  assert.equal(element('btn-calc-spectrum').disabled, true);
+  assert.equal(element('btn-download-spectrum').disabled, true);
+  assert.match(element('waveform-import-status').textContent, /COUNTS/);
+});
+
+test('superseded slow file imports cannot overwrite a newer waveform', async () => {
+  const { app, element } = loadWaveformApp();
+  let resolveText;
+  const pendingText = new Promise(resolve => { resolveText = resolve; });
+  const pending = element('waveform-file').change([{ name: 'old.txt', size: 100, text: () => pendingText }]);
+  await element('waveform-file').change([accelerationFile('GAL', [1, 2, 3])]);
+  resolveText(await accelerationFile().text());
+  await pending;
+  assert.deepEqual(Array.from(app.state().currentWaveformData.acc), [1, 2, 3]);
+  assert.match(element('waveform-import-status').textContent, /observation.txt/);
+});
+
+test('defensive spectrum validation rejects seeded unverified units and disables old exports', () => {
+  const { app, data, element, toasts } = loadWaveformApp();
+  data.meta._unitVerified = false;
+  app.calculateSpectrumForLoadedData();
+  assert.equal(app.state().spectrumInputData, null);
+  assert.equal(app.state().currentSpectrumResult, null);
+  assert.equal(element('btn-download-spectrum').disabled, true);
+  assert.match(toasts.at(-1), /単位・データ検証/);
+});
+
+test('file size limit is checked before reading, and discontinuous files cannot be calculated', async () => {
+  const { app, element } = loadWaveformApp();
+  await element('waveform-file').change([{ name: 'huge.txt', size: 21 * 1024 * 1024, text: () => { throw new Error('must not read'); } }]);
+  assert.match(element('waveform-import-status').textContent, /20 MiB/);
+  const file = accelerationFile();
+  const text = (await file.text()).replace('00:00:00.020', '00:00:00.090');
+  await element('waveform-file').change([{ ...file, text: async () => text }]);
+  assert.equal(app.state().spectrumInputData.meta._hasTimingGap, true);
+  assert.equal(element('btn-waveform-spectrum').disabled, true);
+  assert.equal(element('btn-calc-spectrum').disabled, true);
+  app.calculateSpectrumForLoadedData();
+  assert.equal(app.state().currentSpectrumResult, null);
 });

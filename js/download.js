@@ -127,13 +127,40 @@ const Download = (() => {
     }
 
     const entries = Object.entries(specData.results);
+    const waveform = specData.meta?.waveform;
+    const provenance = waveform && typeof waveform === 'object' && !Array.isArray(waveform)
+      ? [
+          ['waveform_station_id', waveform._stationId || waveform._seriesId],
+          ['waveform_start_utc', waveform._startTime],
+          ['input_unit', waveform._inputUnitReported],
+          ['conversion_to_gal', waveform._conversionToGal],
+          ['unit_evidence', waveform._unitEvidence],
+          ['waveform_source', waveform._source],
+          ['waveform_url', waveform._dataUrl],
+          ['processing', waveform._processing || waveform._filterLabel],
+          ['response_correction_requested', waveform._responseCorrectionRequested],
+          ['raw_header', waveform._rawHeader],
+          ['evaluation_start_s', specData.meta.evaluationStart],
+          ['evaluation_end_s', specData.meta.evaluationEnd],
+          ['header_unit_verified', waveform._unitVerified],
+        ]
+      : [];
+    const provenanceValues = provenance.map(([, value]) => {
+      const serialized = value !== null && typeof value === 'object' ? JSON.stringify(value) : value ?? '';
+      // 外部メタデータは改行を含めて保存し、空白に続く数式も文字列として扱う。
+      return typeof serialized === 'string' && /^\s*[=+\-@]/.test(serialized)
+        ? `'${serialized}`
+        : serialized;
+    });
     const header = [
       'period_s',
       ...entries.map(([damping]) => `${typeLabels[type]}_h${(Number(damping) * 100).toFixed(2)}pct`),
+      ...provenance.map(([name]) => name),
     ];
     const rows = specData.periods.map((period, index) => [
       period,
       ...entries.map(([, values]) => values[type]?.[index] ?? ''),
+      ...provenanceValues,
     ]);
 
     return '\uFEFF' + [header, ...rows]
