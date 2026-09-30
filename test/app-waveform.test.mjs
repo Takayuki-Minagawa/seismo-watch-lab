@@ -68,6 +68,7 @@ function loadWaveformApp() {
     globalThis.waveformAppTest = {
       initWaveformViewer,
       calculateSpectrumForLoadedData,
+      resetWaveformViewerState,
       seed(data, result) {
         selectedFeature = {
           properties: { time: Date.UTC(2026, 0, 1), mag: 5 },
@@ -244,4 +245,42 @@ test('file size limit is checked before reading, and discontinuous files cannot 
   assert.equal(element('btn-calc-spectrum').disabled, true);
   app.calculateSpectrumForLoadedData();
   assert.equal(app.state().currentSpectrumResult, null);
+});
+
+
+test('local import and metadata searches preserve each other while remote waveforms still invalidate', async () => {
+  const { app, element } = loadWaveformApp();
+  element('waveform-station-detail').innerHTML = 'Scale: 2000000 / ScaleUnits: M/S';
+  const stationSelection = element('waveform-station').value;
+  await element('waveform-file').change([accelerationFile()]);
+  const loaded = app.state().currentWaveformData;
+  const spectrum = app.state().spectrumInputData;
+  assert.equal(element('waveform-station-detail').innerHTML, 'Scale: 2000000 / ScaleUnits: M/S');
+  assert.equal(element('waveform-station').value, stationSelection);
+  element('waveform-radius').value = '10';
+  await element('waveform-radius').change([]);
+  assert.equal(app.state().currentWaveformData, loaded);
+  assert.equal(app.state().spectrumInputData, spectrum);
+  assert.equal(element('btn-calc-spectrum').disabled, false);
+  assert.match(element('waveform-import-status').textContent, /observation.txt/);
+  app.resetWaveformViewerState(); // Also called when earthquake search/auto-refresh completes.
+  assert.equal(app.state().currentWaveformData, loaded);
+  assert.equal(app.state().spectrumInputData, spectrum);
+
+  const remote = loadWaveformApp();
+  await remote.element('waveform-radius').change([]);
+  assert.equal(remote.app.state().currentWaveformData, null);
+  assert.equal(remote.app.state().spectrumInputData, null);
+});
+
+test('metadata changes during a slow local import do not cancel that import', async () => {
+  const { app, element } = loadWaveformApp();
+  let resolveText;
+  const pendingText = new Promise(resolve => { resolveText = resolve; });
+  const pending = element('waveform-file').change([{ name: 'slow.txt', size: 100, text: () => pendingText }]);
+  await element('waveform-datacenter').change([]);
+  resolveText(await accelerationFile('GAL').text());
+  await pending;
+  assert.equal(app.state().currentWaveformData.meta._stationId, 'XX.FILE.--.HNE');
+  assert.match(element('waveform-import-status').textContent, /slow.txt/);
 });

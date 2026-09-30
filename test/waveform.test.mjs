@@ -430,10 +430,16 @@ test('timing checks catch one missing sample through 1000 Hz and cumulative cloc
   assert.equal(WaveformViewer.parseWaveformText(series(1000, ['000000', '001000', '002000'])).meta._hasTimingGap, false);
   assert.equal(WaveformViewer.parseWaveformText(series(800, ['000000', '001250', '002500', '003750'])).meta._hasTimingGap, false);
   assert.equal(WaveformViewer.parseWaveformText(series(300, ['000000', '003333', '006667', '010000'])).meta._hasTimingGap, false);
+  assert.equal(WaveformViewer.parseWaveformText(series(100, ['000000', '010001', '020002'])).meta._hasTimingGap, true);
   assert.equal(WaveformViewer.parseWaveformText(series(1000, ['000', '001', '002', '004'])).meta._hasTimingGap, true);
   const unsupported = WaveformViewer.parseWaveformText(series(2000, ['000000', '000500', '001000']));
   assert.equal(unsupported.meta._hasTimingGap, true);
   assert.ok(unsupported.meta._timingIssues.some(issue => /1000 Hz/.test(issue)));
+  for (const rate of [20, 40, 100]) {
+    const fractions = Array.from({ length: 5 }, (_, index) => String(19538 + index * 1000000 / rate).padStart(6, '0'));
+    const source = series(rate, fractions).replace('2026-01-01T00:00:00.000000,', '2026-01-01T00:00:00.019538,');
+    assert.equal(WaveformViewer.parseWaveformText(source).meta._hasTimingGap, false, `${rate} Hz fractional start`);
+  }
 });
 
 test('waveform chart visibly explains timing issues and the declared-dt horizontal axis', () => {

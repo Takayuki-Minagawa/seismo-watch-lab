@@ -17,6 +17,7 @@
   let currentSpectrumResult = null;
   let spectrumCalculationSeq = 0;
   let currentWaveformData = null;
+  let waveformInputMode = null; // file は観測点検索・選択と独立した入力
   let currentWaveformView = { start: 0, end: null };
   const PAGE_SIZE = 50;
   const searchRequests = AppUtils.createRequestCoordinator();
@@ -584,7 +585,7 @@
       const filterPreset = filterSel.value;
       const timeWindow = WaveformViewer.getTimeWindow(selectedFeature);
 
-      invalidateLoadedWaveform();
+      invalidateWaveformForStationChange();
       stationInfoRequests.cancel();
       resetWaveformStationDetail();
       stationSel.innerHTML = '<option value="">-- 観測点を検索中 --</option>';
@@ -669,6 +670,7 @@
 
       const station = JSON.parse(stationSel.value);
       const timeWindow = WaveformViewer.getTimeWindow(selectedFeature);
+      waveformInputMode = 'remote';
       const requestedStationKey = station.stationKey;
       const requestedFilter = filterSel.value;
       btnShow.disabled = true;
@@ -761,7 +763,8 @@
     const file = event.target.files?.[0];
     if (!file) return;
     // 読込開始時に旧波形・旧計算結果を無効化し、遅い読込が後の操作を上書きしないようにする。
-    resetWaveformViewerState();
+    invalidateLoadedWaveform();
+    waveformInputMode = 'file';
     const request = waveformRequests.begin();
     const status = $('#waveform-import-status');
     if (status) status.textContent = `${file.name} を読み込み中...`;
@@ -1029,11 +1032,16 @@
 
     resetWaveformStationDetail();
 
-    invalidateLoadedWaveform();
+    invalidateWaveformForStationChange();
+  }
+
+  function invalidateWaveformForStationChange() {
+    if (waveformInputMode !== 'file') invalidateLoadedWaveform();
   }
 
   function invalidateLoadedWaveform() {
     waveformRequests.cancel();
+    waveformInputMode = null;
     const status = $('#waveform-import-status');
     if (status) status.textContent = '';
     currentWaveformData = null;
@@ -1053,7 +1061,7 @@
   function handleStationSearchCriteriaChange(criteriaLabel) {
     stationSearchRequests.cancel();
     stationInfoRequests.cancel();
-    invalidateLoadedWaveform();
+    invalidateWaveformForStationChange();
 
     const stationSel = $('#waveform-station');
     if (stationSel) {
@@ -1181,7 +1189,7 @@
   }
 
   function onWaveformStationSelectionChange() {
-    invalidateLoadedWaveform();
+    invalidateWaveformForStationChange();
     handleWaveformStationSelectionChange();
   }
 
