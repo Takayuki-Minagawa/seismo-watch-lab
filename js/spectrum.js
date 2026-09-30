@@ -432,8 +432,12 @@ const Spectrum = (() => {
   /**
    * チャートをクリア
    */
-  function clearCharts() {
+  function clearSpectrumChart() {
     if (spectrumChart) { spectrumChart.destroy(); spectrumChart = null; }
+  }
+
+  function clearCharts() {
+    clearSpectrumChart();
     if (waveformChart) { waveformChart.destroy(); waveformChart = null; }
   }
 
@@ -445,6 +449,7 @@ const Spectrum = (() => {
     normalizeEvaluationRange,
     renderWaveform,
     renderSpectrum,
+    clearSpectrumChart,
     clearCharts,
   };
 })();

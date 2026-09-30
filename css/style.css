@@ -141,6 +141,21 @@ a:hover {
   align-items: end;
 }
 
+.results-notice {
+  margin: 0 1rem 1rem;
+  padding: 0.75rem;
+  border-left: 4px solid var(--warning);
+  background: var(--bg);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.search-mode-status {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
 .form-group {
   display: flex;
   flex-direction: column;

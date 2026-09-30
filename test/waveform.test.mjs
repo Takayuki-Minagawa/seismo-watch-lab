@@ -69,6 +69,64 @@ test('station metadata fetch remains cancellable while its response body is pend
   await assert.rejects(request, error => error?.name === 'AbortError');
 });
 
+test('station metadata and response links use the station search datacenter', async () => {
+  const requestedUrls = [];
+  const WaveformViewer = loadWaveform({
+    fetch: async url => {
+      requestedUrls.push(new URL(url));
+      return {
+        ok: true,
+        status: 200,
+        text: async () => '#Network|Station|SiteName\nNZ|TEST|GeoNet test site',
+      };
+    },
+  });
+  const station = {
+    network: 'NZ', station: 'TEST', location: '', channel: 'HNN',
+    stationKey: 'NZ.TEST.--.HNN', _datacenter: 'geonet',
+  };
+  const info = await WaveformViewer.fetchStationPublicInfo(station, Date.UTC(2026, 0, 1));
+
+  assert.equal(requestedUrls[0].origin, 'https://service.geonet.org.nz');
+  assert.equal(info.siteRow.SiteName, 'GeoNet test site');
+  assert.equal(info.datacenterLabel, 'GeoNet');
+  for (const url of Object.values(info.urls)) {
+    assert.equal(new URL(url).origin, 'https://service.geonet.org.nz');
+    assert.equal(new URL(url).searchParams.get('net'), 'NZ');
+  }
+  assert.equal(new URL(info.urls.responseXmlUrl).searchParams.get('level'), 'response');
+  assert.equal(new URL(info.urls.responseXmlUrl).searchParams.get('format'), 'xml');
+});
+
+test('station metadata cache does not share records across datacenters', async () => {
+  let requestCount = 0;
+  const WaveformViewer = loadWaveform({
+    fetch: async url => {
+      requestCount += 1;
+      const provider = new URL(url).hostname;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => `#Network|Station|SiteName\nNZ|TEST|${provider}`,
+      };
+    },
+  });
+  const station = {
+    network: 'NZ', station: 'TEST', location: '', channel: 'HNN',
+    stationKey: 'NZ.TEST.--.HNN',
+  };
+  const eventTime = Date.UTC(2026, 0, 1);
+  const irisInfo = await WaveformViewer.fetchStationPublicInfo(station, eventTime);
+  const geoNetStation = { ...station, _datacenter: 'geonet' };
+  const geoNetInfo = await WaveformViewer.fetchStationPublicInfo(geoNetStation, eventTime);
+  const cachedGeoNetInfo = await WaveformViewer.fetchStationPublicInfo(geoNetStation, eventTime);
+
+  assert.equal(irisInfo.siteRow.SiteName, 'service.iris.edu');
+  assert.equal(geoNetInfo.siteRow.SiteName, 'service.geonet.org.nz');
+  assert.equal(cachedGeoNetInfo, geoNetInfo);
+  assert.equal(requestCount, 2);
+});
+
 test('waveform slicing handles large arrays and preserves requested range metadata', () => {
   const WaveformViewer = loadWaveform();
   const data = {

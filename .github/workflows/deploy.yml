@@ -1,9 +1,6 @@
 name: Deploy to GitHub Pages
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -15,6 +12,7 @@ concurrency:
 
 jobs:
   quality:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,7 +27,7 @@ jobs:
         run: npm run check
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main'
     needs: quality
     permissions:
       contents: read
