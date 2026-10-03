@@ -17,7 +17,7 @@ function loadServiceWorker() {
     addEventListener: (name, handler) => { handlers[name] = handler; },
   };
   const caches = {
-    keys: async () => ['unrelated-app-cache', 'seismo-v3', 'seismo-watch-v2', 'seismo-watch-v4', 'seismo-watch-v5', 'seismo-watch-v6', 'seismo-watch-v7'],
+    keys: async () => ['unrelated-app-cache', 'seismo-v3', 'seismo-watch-v2', 'seismo-watch-v4', 'seismo-watch-v5', 'seismo-watch-v6', 'seismo-watch-v7', 'seismo-watch-v8'],
     delete: async key => { deleted.push(key); return true; },
     open: async () => {
       cacheOpenCount += 1;
@@ -46,8 +46,8 @@ test('activation deletes only caches owned by this app', async () => {
   runtime.handlers.activate({ waitUntil: promise => { completion = promise; } });
   await completion;
 
-  assert.deepEqual(runtime.deleted.sort(), ['seismo-v3', 'seismo-watch-v2', 'seismo-watch-v4', 'seismo-watch-v5', 'seismo-watch-v6']);
-  assert.ok(!runtime.deleted.includes('seismo-watch-v7'));
+  assert.deepEqual(runtime.deleted.sort(), ['seismo-v3', 'seismo-watch-v2', 'seismo-watch-v4', 'seismo-watch-v5', 'seismo-watch-v6', 'seismo-watch-v7']);
+  assert.ok(!runtime.deleted.includes('seismo-watch-v8'));
   assert.ok(!runtime.deleted.includes('unrelated-app-cache'));
 });
 

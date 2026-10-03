@@ -120,15 +120,20 @@ const MonitorDashboard = (() => {
     const counts = new Map();
     features.forEach(feature => {
       const region = classifyRegion(feature);
-      const current = counts.get(region) || { name: region, count: 0, maxMag: 0, latestTime: 0 };
+      const current = counts.get(region) || { name: region, count: 0, maxMag: null, latestTime: 0 };
       current.count += 1;
-      current.maxMag = Math.max(current.maxMag, feature.properties?.mag || 0);
+      const magnitude = feature.properties?.mag;
+      if (Number.isFinite(magnitude) && (current.maxMag === null || magnitude > current.maxMag)) {
+        current.maxMag = magnitude;
+      }
       current.latestTime = Math.max(current.latestTime, feature.properties?.time || 0);
       counts.set(region, current);
     });
 
     return [...counts.values()]
-      .sort((a, b) => b.count - a.count || b.maxMag - a.maxMag || b.latestTime - a.latestTime)
+      .sort((a, b) => b.count - a.count
+        || (b.maxMag ?? -Infinity) - (a.maxMag ?? -Infinity)
+        || b.latestTime - a.latestTime)
       .slice(0, 5);
   }
 
@@ -197,7 +202,7 @@ const MonitorDashboard = (() => {
     el.innerHTML = hotspots.map(item => `
       <div class="monitor-row">
         <span class="monitor-row-title">${escapeHtml(item.name)}</span>
-        <span>${item.count}件 / 最大M${item.maxMag.toFixed(1)}</span>
+        <span>${item.count}件 / 最大M${formatNumber(item.maxMag, 1)}</span>
       </div>
     `).join('');
   }

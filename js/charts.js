@@ -21,6 +21,11 @@ const Charts = (() => {
     '#48bb78', '#a0c45a', '#ecc94b', '#ed8936', '#e53e3e', '#9b2c2c', '#4a0000'
   ];
   const magLabels = ['M<3', 'M3-4', 'M4-5', 'M5-6', 'M6-7', 'M7-8', 'M8+'];
+  const timelineDateFormatter = new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    month: 'numeric',
+    day: 'numeric',
+  });
 
   function showUnavailable(show) {
     const grid = document.getElementById('chart-mag')?.closest('.chart-grid');
@@ -116,22 +121,15 @@ const Charts = (() => {
    * 深さ分布（棒グラフ）
    */
   function renderDepthDistribution(features) {
-    const binEdges = [0, 10, 30, 70, 150, 300, 700];
-    const binLabels = ['0-10', '10-30', '30-70', '70-150', '150-300', '300-700', '700+'];
+    const binUpperBounds = [0, 10, 30, 70, 150, 300, 700, Infinity];
+    const binLabels = ['<0', '0-10', '10-30', '30-70', '70-150', '150-300', '300-700', '700+'];
     const bins = new Array(binLabels.length).fill(0);
 
     features.forEach(f => {
       const d = f.geometry.coordinates[2];
       if (d === null || d === undefined) return;
-      let placed = false;
-      for (let i = 0; i < binEdges.length; i++) {
-        if (d < binEdges[i + 1] || i === binEdges.length - 1) {
-          bins[i]++;
-          placed = true;
-          break;
-        }
-      }
-      if (!placed) bins[bins.length - 1]++;
+      const index = binUpperBounds.findIndex(upperBound => d < upperBound);
+      if (index >= 0) bins[index]++;
     });
 
     const ctx = document.getElementById('chart-depth');
@@ -219,14 +217,11 @@ const Charts = (() => {
             type: 'linear',
             ticks: {
               color: getTextColor(),
-              callback: (val) => {
-                const d = new Date(val);
-                return `${d.getMonth() + 1}/${d.getDate()}`;
-              },
+              callback: (val) => timelineDateFormatter.format(new Date(val)),
               maxTicksLimit: 10,
             },
             grid: { color: getGridColor() },
-            title: { display: true, text: '日付', color: getTextColor() },
+            title: { display: true, text: '日付 (JST)', color: getTextColor() },
           },
           y: {
             ticks: { color: getTextColor() },

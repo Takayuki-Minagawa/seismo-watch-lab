@@ -33,6 +33,31 @@ test('maxAbs handles long waveforms without spreading array arguments', () => {
   assert.equal(AppUtils.maxAbs(values), 321.5);
 });
 
+test('waveform reduction retains both extrema, exact timestamps, chronological order and endpoints', () => {
+  const samples = new Array(8001).fill(0);
+  samples[0] = 3;
+  samples[1] = 500;
+  samples[2] = -750;
+  samples[7999] = -250;
+  samples[8000] = 7;
+  const points = AppUtils.buildPeakPreservingPoints(samples, 0.01, 2000, 12.5);
+  assert.ok(points.length <= 2000);
+  assert.deepEqual({ ...points[0] }, { x: 12.5, y: 3 });
+  assert.deepEqual({ ...points.at(-1) }, { x: 92.5, y: 7 });
+  assert.ok(points.some(point => point.x === 12.51 && point.y === 500));
+  assert.ok(points.some(point => point.x === 12.52 && point.y === -750));
+  assert.ok(points.some(point => point.y === -250));
+  assert.ok(points.every((point, index) => index === 0 || point.x > points[index - 1].x));
+  assert.equal(samples[1], 500, 'plot reduction leaves the solver input intact');
+});
+
+test('short waveform plots keep every original sample and sub-centisecond timestamp', () => {
+  const points = AppUtils.buildPeakPreservingPoints([1, -2, 3], 0.001, 2000);
+  assert.deepEqual(Array.from(points, point => ({ ...point })), [
+    { x: 0, y: 1 }, { x: 0.001, y: -2 }, { x: 0.002, y: 3 },
+  ]);
+});
+
 test('sample index helpers preserve exact grid points and exclude samples outside a requested interval', () => {
   assert.equal(AppUtils.sampleIndexAtOrAfter(0.3, 0.1), 3);
   assert.equal(AppUtils.sampleIndexAtOrBefore(0.3, 0.1), 3);

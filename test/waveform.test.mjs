@@ -454,3 +454,23 @@ test('waveform chart visibly explains timing issues and the declared-dt horizont
   assert.match(container.innerHTML, /横軸はヘッダーのサンプリング間隔/);
   assert.ok(container.innerHTML.includes(parsed.meta._timingIssues[0]));
 });
+
+test('waveform viewer preserves isolated positive and negative peaks when reducing a long plot', () => {
+  let configuration;
+  const container = { innerHTML: '' };
+  const WaveformViewer = loadWaveform({
+    document: { getElementById: id => id === 'waveform' ? container : {} },
+    Chart: class { constructor(_canvas, config) { configuration = config; } },
+  });
+  const data = WaveformViewer.parseWaveformText(asciiWaveform('GAL'));
+  data.acc = new Array(8001).fill(0);
+  data.acc[1] = 500;
+  data.acc[2] = -750;
+  Object.assign(data.meta, { _npts: data.acc.length, _duration: 80, _maxAcc: 750 });
+  WaveformViewer.renderWaveform(data, 'waveform');
+  const points = configuration.data.datasets[0].data;
+  assert.ok(points.length <= 4000);
+  assert.ok(points.some(point => point.x === 0.01 && point.y === 500));
+  assert.ok(points.some(point => point.x === 0.02 && point.y === -750));
+  assert.equal(points.at(-1).x, 80);
+});

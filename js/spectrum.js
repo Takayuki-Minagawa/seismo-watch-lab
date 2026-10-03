@@ -323,30 +323,20 @@ const Spectrum = (() => {
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
 
-    // データが多い場合は間引き
-    const maxPoints = 2000;
-    let plotAcc = acc;
-    let plotDt = dt;
-    if (acc.length > maxPoints) {
-      const step = Math.ceil(acc.length / maxPoints);
-      plotAcc = acc.filter((_, i) => i % step === 0);
-      plotDt = dt * step;
-    }
-
-    const labels = plotAcc.map((_, i) => (i * plotDt).toFixed(2));
+    const points = AppUtils.buildPeakPreservingPoints(acc, dt, 2000);
 
     if (waveformChart) waveformChart.destroy();
     waveformChart = new Chart(ctx, {
       type: 'line',
       data: {
-        labels: labels,
         datasets: [{
           label: '加速度 (gal)',
-          data: plotAcc,
+          data: points,
           borderColor: '#e53e3e',
           borderWidth: 1,
           pointRadius: 0,
           fill: false,
+          parsing: false,
         }]
       },
       options: {
@@ -359,6 +349,7 @@ const Spectrum = (() => {
         },
         scales: {
           x: {
+            type: 'linear',
             title: { display: true, text: '時間 (秒)' },
             ticks: { maxTicksLimit: 10 },
           },

@@ -24,13 +24,17 @@ function createElement(id) {
       this.files = files;
       for (const listener of listeners.get('change') || []) await listener({ target: this });
     },
+    async input(value) {
+      this.value = value;
+      for (const listener of listeners.get('input') || []) await listener({ target: this });
+    },
     async click() {
       for (const listener of listeners.get('click') || []) await listener({ target: this });
     },
   };
 }
 
-function loadWaveformApp() {
+function loadWaveformApp({ queueTimers = false } = {}) {
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, createElement(id));
@@ -38,7 +42,9 @@ function loadWaveformApp() {
   };
   const charts = [];
   const toasts = [];
+  const timers = [];
   const context = createBrowserLikeContext({
+    ...(queueTimers ? { setTimeout: callback => { timers.push(callback); return timers.length; } } : {}),
     document: {
       querySelector: selector => selector.startsWith('#') ? element(selector.slice(1)) : null,
       querySelectorAll: () => [],
@@ -67,6 +73,7 @@ function loadWaveformApp() {
   const exposedSource = appSource.replace(startup, `
     globalThis.waveformAppTest = {
       initWaveformViewer,
+      initSpectrumTool,
       calculateSpectrumForLoadedData,
       resetWaveformViewerState,
       seed(data, result) {
@@ -86,6 +93,7 @@ function loadWaveformApp() {
   `);
   vm.runInContext(exposedSource, context, { filename: appPath.pathname });
   const app = context.waveformAppTest;
+  app.initSpectrumTool();
   app.initWaveformViewer();
 
   const data = {
@@ -106,11 +114,15 @@ function loadWaveformApp() {
   element('btn-download-spectrum').disabled = false;
   element('btn-calc-spectrum').disabled = false;
   element('spectrum-summary').innerHTML = 'previous spectrum summary';
+  element('spectrum-damping').value = '5';
+  element('spectrum-type').value = 'sa';
   element('waveform-filter').value = 'none';
   element('waveform-station').value = JSON.stringify({
     network: 'XX', station: 'TEST', location: '', channel: 'HNN', stationKey: 'XX.TEST.--.HNN',
   });
-  return { app, data, result, element, charts, toasts, WaveformViewer };
+  return { app, data, result, element, charts, toasts, WaveformViewer, Spectrum,
+    runTimers: () => timers.splice(0).forEach(callback => callback()),
+  };
 }
 
 test('rejecting a one-sample view range preserves the loaded waveform and spectrum result', async () => {
@@ -153,7 +165,7 @@ test('applying a valid view range clears the previous spectrum and uses the sele
   assert.equal(state.spectrumInputData.meta._npts, 2);
   const currentInputChart = charts.filter(chart => chart.canvas.id === 'chart-waveform-input').at(-1);
   assert.equal(currentInputChart.destroyed, false);
-  assert.deepEqual(Array.from(currentInputChart.config.data.datasets[0].data), [10, -20]);
+  assert.deepEqual(Array.from(currentInputChart.config.data.datasets[0].data, point => point.y), [10, -20]);
 });
 
 test('a failed waveform reload clears stale spectrum data, charts, and download controls', async () => {
@@ -283,4 +295,87 @@ test('metadata changes during a slow local import do not cancel that import', as
   await pending;
   assert.equal(app.state().currentWaveformData.meta._stationId, 'XX.FILE.--.HNE');
   assert.match(element('waveform-import-status').textContent, /slow.txt/);
+});
+
+test('view controls preserve short records and precise bounds through repeated zoom and reset', async () => {
+  const { app, element } = loadWaveformApp();
+  await element('waveform-file').change([accelerationFile('GAL', [0, 0, 100])]);
+  assert.equal(element('waveform-view-end').value, '0.02');
+  assert.equal(element('waveform-view-end').max, '0.02');
+  assert.equal(element('waveform-view-end').step, 'any');
+  assert.match(element('spectrum-info').innerHTML, /継続時間: 0\.020秒/);
+  assert.match(element('waveform-display').innerHTML, /実効サンプル範囲: 0\.000 - 0\.020 秒/);
+  await element('btn-apply-waveform-view').click();
+  assert.equal(app.state().spectrumInputData.meta._npts, 3);
+  assert.equal(app.state().spectrumInputData.meta._maxAcc, 100);
+
+  // Neither selecting nor resetting a sub-tenth-second range may round away its last sample.
+  await element('waveform-view-start').input('0.009');
+  await element('waveform-view-end').input('0.02');
+  await element('btn-apply-waveform-view').click();
+  assert.equal(element('waveform-view-start').value, '0.009');
+  assert.equal(app.state().spectrumInputData.meta._npts, 2);
+  await element('btn-apply-waveform-view').click();
+  assert.equal(app.state().spectrumInputData.meta._npts, 2);
+  await element('btn-reset-waveform-view').click();
+  assert.equal(element('waveform-view-end').value, '0.02');
+  assert.equal(app.state().spectrumInputData.meta._npts, 3);
+});
+
+test('damping edits invalidate the previous spectrum and export while preserving the input waveform', async () => {
+  for (const event of ['input', 'change']) {
+    const { app, data, element, charts } = loadWaveformApp();
+    element('spectrum-damping').value = '10';
+    if (event === 'input') await element('spectrum-damping').input('10');
+    else await element('spectrum-damping').change();
+    assert.equal(app.state().currentSpectrumResult, null, event);
+    assert.equal(app.state().spectrumInputData, data, event);
+    assert.equal(app.state().currentWaveformData, data, event);
+    assert.equal(element('btn-download-spectrum').disabled, true, event);
+    assert.equal(element('btn-calc-spectrum').disabled, false, event);
+    assert.equal(element('spectrum-summary').innerHTML, '', event);
+    assert.equal(charts[0].destroyed, false, event);
+    assert.equal(charts[1].destroyed, false, event);
+    assert.equal(charts[2].destroyed, true, event);
+  }
+});
+
+test('invalid damping and failed recalculation cannot leave an earlier spectrum exportable', () => {
+  const invalid = loadWaveformApp({ queueTimers: true });
+  invalid.element('spectrum-damping').value = 'invalid';
+  invalid.app.calculateSpectrumForLoadedData();
+  assert.equal(invalid.app.state().currentSpectrumResult, null);
+  assert.equal(invalid.element('btn-download-spectrum').disabled, true);
+  assert.match(invalid.toasts.at(-1), /減衰定数/);
+
+  const failed = loadWaveformApp({ queueTimers: true });
+  failed.Spectrum.computeSpectrum = () => { throw new Error('fixture computation failure'); };
+  failed.app.calculateSpectrumForLoadedData();
+  assert.equal(failed.app.state().currentSpectrumResult, null, 'old result clears before the queued calculation');
+  assert.equal(failed.element('btn-download-spectrum').disabled, true);
+  failed.runTimers();
+  assert.equal(failed.app.state().currentSpectrumResult, null);
+  assert.equal(failed.app.state().spectrumInputData, failed.data);
+  assert.equal(failed.element('btn-calc-spectrum').disabled, false);
+  assert.equal(failed.element('btn-download-spectrum').disabled, true);
+  assert.match(failed.toasts.at(-1), /fixture computation failure/);
+});
+
+test('a damping edit cancels queued spectrum work before entering the solver', async () => {
+  const { app, element, Spectrum, runTimers } = loadWaveformApp({ queueTimers: true });
+  let calculations = 0;
+  const computeSpectrum = Spectrum.computeSpectrum;
+  Spectrum.computeSpectrum = (...args) => { calculations += 1; return computeSpectrum(...args); };
+  app.calculateSpectrumForLoadedData();
+  await element('spectrum-damping').input('10');
+  runTimers();
+  assert.equal(calculations, 0);
+  assert.equal(app.state().currentSpectrumResult, null);
+  assert.equal(element('btn-calc-spectrum').disabled, false);
+
+  app.calculateSpectrumForLoadedData();
+  runTimers();
+  assert.equal(calculations, 1);
+  assert.deepEqual(Object.keys(app.state().currentSpectrumResult.results), ['0.1']);
+  assert.equal(element('btn-download-spectrum').disabled, false);
 });

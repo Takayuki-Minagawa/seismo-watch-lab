@@ -974,8 +974,8 @@ const WaveformViewer = (() => {
         <span>観測点: ${escapeHtml(data.meta._stationId || '?')}</span>
         <span>点数: ${waveformSlice.meta._npts}</span>
         <span>dt: ${waveformSlice.meta._dt.toFixed(4)} 秒</span>
-        <span>表示指定: ${range.start.toFixed(2)} - ${range.end.toFixed(2)} 秒</span>
-        <span>実効サンプル範囲: ${waveformSlice.meta._analysisWindowStart.toFixed(2)} - ${waveformSlice.meta._analysisWindowEnd.toFixed(2)} 秒</span>
+        <span>表示指定: ${range.start.toFixed(3)} - ${range.end.toFixed(3)} 秒</span>
+        <span>実効サンプル範囲: ${waveformSlice.meta._analysisWindowStart.toFixed(3)} - ${waveformSlice.meta._analysisWindowEnd.toFixed(3)} 秒</span>
         <span>最大加速度: ${waveformSlice.meta._maxAcc.toFixed(2)} ${data.meta._displayUnit || 'gal'}</span>
         <span>フィルタ: ${escapeHtml(data.meta._filterLabel || 'なし')}</span>
       </div>
@@ -1056,26 +1056,7 @@ const WaveformViewer = (() => {
   }
 
   function buildChartPoints(acc, dt, offsetSeconds = 0) {
-    const pointCount = acc.length;
-    const step = Math.max(1, Math.ceil(pointCount / MAX_PLOT_POINTS));
-    const points = [];
-
-    for (let i = 0; i < pointCount; i += step) {
-      points.push({
-        x: offsetSeconds + i * dt,
-        y: acc[i],
-      });
-    }
-
-    const lastIndex = pointCount - 1;
-    if (lastIndex >= 0 && (points.length === 0 || points[points.length - 1].x < offsetSeconds + lastIndex * dt)) {
-      points.push({
-        x: offsetSeconds + lastIndex * dt,
-        y: acc[lastIndex],
-      });
-    }
-
-    return points;
+    return AppUtils.buildPeakPreservingPoints(acc, dt, MAX_PLOT_POINTS, offsetSeconds);
   }
 
   async function displayWaveform(station, starttime, endtime, containerId, options = {}) {

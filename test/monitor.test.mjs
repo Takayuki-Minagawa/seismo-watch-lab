@@ -44,3 +44,34 @@ test('tsunami-related flag is not double-counted in the watch score', () => {
   const flagged = feature({ magnitude: 6, time: Date.now(), tsunami: 1 });
   assert.equal(MonitorDashboard.riskScore(base), MonitorDashboard.riskScore(flagged));
 });
+
+test('regional maximum magnitude preserves unknown and negative values', () => {
+  const time = Date.now();
+  const unknown = MonitorDashboard.buildSummaries([
+    feature({ magnitude: null, time }),
+  ]);
+  assert.equal(unknown.hotspots[0].maxMag, null);
+
+  const negative = MonitorDashboard.buildSummaries([
+    feature({ magnitude: -1.2, time }),
+    feature({ magnitude: -0.5, time }),
+    feature({ magnitude: null, time }),
+  ]);
+  assert.equal(negative.hotspots[0].maxMag, -0.5);
+
+  const unknownElsewhere = feature({ magnitude: null, time });
+  unknownElsewhere.geometry.coordinates = [-120, 35, 20];
+  const ranked = MonitorDashboard.buildSummaries([
+    unknownElsewhere, feature({ magnitude: -0.5, time }),
+  ]);
+  assert.equal(ranked.hotspots[0].maxMag, -0.5);
+  assert.equal(ranked.hotspots[1].maxMag, null);
+
+  const hotspots = { innerHTML: '', classList: { add() {}, remove() {} } };
+  context.document = { getElementById: id => id === 'monitor-hotspots' ? hotspots : null };
+  MonitorDashboard.render({ features: [feature({ magnitude: null, time })] });
+  assert.match(hotspots.innerHTML, /最大M\?/);
+  assert.doesNotMatch(hotspots.innerHTML, /最大M0\.0/);
+  MonitorDashboard.render({ features: [feature({ magnitude: -0.5, time })] });
+  assert.match(hotspots.innerHTML, /最大M-0\.5/);
+});

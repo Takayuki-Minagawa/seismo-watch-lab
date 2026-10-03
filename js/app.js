@@ -207,12 +207,33 @@
 
   // --- 検索パラメータ組み立て ---
   function buildSearchParams() {
+    const regionKey = els.region.value;
+    const activeInputs = [
+      [els.startdate, '開始日'],
+      [els.enddate, '終了日'],
+      [els.maxdepth, '最大深さ'],
+    ];
+    if (regionKey === 'custom') {
+      activeInputs.push(
+        [$('#custom-minlat'), '南端緯度'], [$('#custom-maxlat'), '北端緯度'],
+        [$('#custom-minlon'), '西端経度'], [$('#custom-maxlon'), '東端経度']
+      );
+    } else if (regionKey === 'circle') {
+      activeInputs.push(
+        [$('#circle-latitude'), '中心緯度'], [$('#circle-longitude'), '中心経度'],
+        [$('#circle-radius'), '検索半径']
+      );
+    }
+    // 例: 数値欄の「1e」は value が空になる。意図した空欄と区別して条件の脱落を防ぐ。
+    for (const [input, label] of activeInputs) {
+      if (input?.validity?.badInput) throw new RangeError(`${label}の入力を完成させてください`);
+    }
+
     const params = AppUtils.buildUTCDateRange(els.startdate.value, els.enddate.value);
     if (els.minmag.value) params.minmagnitude = els.minmag.value;
     if (els.maxdepth.value) params.maxdepth = els.maxdepth.value;
     if (els.limit.value) params.limit = els.limit.value;
 
-    const regionKey = els.region.value;
     if (regionKey === 'custom') {
       params.requireBounds = true;
       params.minlat = $('#custom-minlat').value;
@@ -536,6 +557,9 @@
     const btnDownload = $('#btn-download-spectrum');
     const typeSelect = $('#spectrum-type');
     resetSpectrumState();
+    const dampingInput = $('#spectrum-damping');
+    dampingInput?.addEventListener('input', invalidateSpectrumResult);
+    dampingInput?.addEventListener('change', invalidateSpectrumResult);
     btnCalc.addEventListener('click', calculateSpectrumForLoadedData);
     btnDownload?.addEventListener('click', () => {
       if (!currentSpectrumResult) return;
@@ -795,17 +819,8 @@
   function setSpectrumInput(data, sourceLabel = '', displayData = data) {
     WaveformViewer.validateAccelerationData(data);
     spectrumInputData = data;
-    currentSpectrumResult = null;
-    spectrumCalculationSeq += 1;
-    Spectrum.clearSpectrumChart();
+    invalidateSpectrumResult();
     Spectrum.renderWaveform(displayData.acc, displayData.dt, 'chart-waveform-input');
-
-    const btnCalc = $('#btn-calc-spectrum');
-    if (btnCalc) btnCalc.disabled = Boolean(data.meta?._hasTimingGap);
-    const btnDownload = $('#btn-download-spectrum');
-    if (btnDownload) btnDownload.disabled = true;
-    const summary = $('#spectrum-summary');
-    if (summary) summary.innerHTML = '';
 
     const info = $('#spectrum-info');
     if (info) {
@@ -822,7 +837,7 @@
     parts.push(`<strong>${escapeHtml(sourceLabel || '入力データをセットしました')}</strong>`);
     parts.push(`データ点数: ${meta._npts}`);
     parts.push(`サンプリング間隔: ${meta._dt.toFixed(4)}秒`);
-    parts.push(`継続時間: ${meta._duration.toFixed(1)}秒`);
+    parts.push(`継続時間: ${meta._duration.toFixed(3)}秒`);
     parts.push(`最大加速度: ${meta._maxAcc.toFixed(2)} gal`);
     parts.push(`単位根拠: ヘッダー ${escapeHtml(meta._inputUnitReported || '')} / 値 × ${meta._conversionToGal} → gal`);
     parts.push('計器補正・校正の正しさは未検証');
@@ -833,7 +848,7 @@
     if (meta._stationId) parts.push(`観測点: ${escapeHtml(meta._stationId)}`);
     if (meta._filterLabel) parts.push(`フィルタ: ${escapeHtml(meta._filterLabel)}`);
     if (Number.isFinite(meta._analysisWindowStart) && Number.isFinite(meta._analysisWindowEnd)) {
-      parts.push(`解析区間: ${meta._analysisWindowStart.toFixed(1)} - ${meta._analysisWindowEnd.toFixed(1)} 秒`);
+      parts.push(`解析区間: ${meta._analysisWindowStart.toFixed(3)} - ${meta._analysisWindowEnd.toFixed(3)} 秒`);
     }
     if (Number.isFinite(meta._sourceNpts) && meta._sourceNpts !== meta._npts) {
       parts.push(`状態積分: 元波形 ${meta._sourceNpts} 点の先頭から実施`);
@@ -842,7 +857,21 @@
     return parts.join(' / ');
   }
 
+  function invalidateSpectrumResult() {
+    currentSpectrumResult = null;
+    spectrumCalculationSeq += 1;
+    Spectrum.clearSpectrumChart();
+    const btnCalc = $('#btn-calc-spectrum');
+    if (btnCalc) btnCalc.disabled = !spectrumInputData || Boolean(spectrumInputData.meta?._hasTimingGap);
+    const btnDownload = $('#btn-download-spectrum');
+    if (btnDownload) btnDownload.disabled = true;
+    const summary = $('#spectrum-summary');
+    if (summary) summary.innerHTML = '';
+  }
+
   function calculateSpectrumForLoadedData() {
+    // 入力変更・再計算の失敗後に、以前の条件の結果を出力できないようにする。
+    invalidateSpectrumResult();
     if (!spectrumInputData) {
       Settings.showToast('先に波形ビューアで加速度波形ファイルを読み込んでください');
       return;
@@ -874,11 +903,12 @@
     const inputData = spectrumInputData;
 
     Settings.showToast('応答スペクトルを計算中...');
-    const calculationSeq = ++spectrumCalculationSeq;
+    const calculationSeq = spectrumCalculationSeq;
     const btnCalc = $('#btn-calc-spectrum');
     if (btnCalc) btnCalc.disabled = true;
 
     setTimeout(() => {
+      if (calculationSeq !== spectrumCalculationSeq) return;
       try {
         const result = Spectrum.computeSpectrum(inputData.acc, inputData.dt, {
           hList: dampings,
@@ -893,14 +923,17 @@
 
         const type = $('#spectrum-type').value;
         result.meta.waveform = { ...inputData.meta };
-        currentSpectrumResult = result;
         Spectrum.renderSpectrum(result, 'chart-spectrum', type);
         renderSpectrumSummary(result, type);
+        currentSpectrumResult = result;
         const btnDownload = $('#btn-download-spectrum');
         if (btnDownload) btnDownload.disabled = false;
         Settings.showToast('応答スペクトルの計算が完了しました');
       } catch (err) {
-        if (calculationSeq === spectrumCalculationSeq) Settings.showToast(`計算エラー: ${err.message}`);
+        if (calculationSeq === spectrumCalculationSeq) {
+          invalidateSpectrumResult();
+          Settings.showToast(`計算エラー: ${err.message}`);
+        }
       } finally {
         if (calculationSeq === spectrumCalculationSeq && btnCalc) btnCalc.disabled = false;
       }
@@ -928,7 +961,7 @@
 
     container.innerHTML = `
       <strong>計算結果要約</strong>
-      <span>PGA: ${result.meta.pga.toFixed(3)} gal / 評価区間: ${result.meta.evaluationStart.toFixed(2)}〜${result.meta.evaluationEnd.toFixed(2)}秒</span>
+      <span>PGA: ${result.meta.pga.toFixed(3)} gal / 評価区間: ${result.meta.evaluationStart.toFixed(3)}〜${result.meta.evaluationEnd.toFixed(3)}秒</span>
       <ul>${peaks}</ul>
       <span>${samplingNote}</span>
     `;
@@ -970,7 +1003,7 @@
     end = Math.max(0, Math.min(end, duration));
 
     if (end <= start) {
-      throw new Error(`表示終了秒は表示開始秒より ${minSpan.toFixed(2)} 秒以上大きくしてください`);
+      throw new Error(`表示終了秒は表示開始秒より ${minSpan} 秒以上大きくしてください`);
     }
 
     return { start, end };
@@ -979,8 +1012,8 @@
   function updateWaveformViewInputs(start, end) {
     const startInput = $('#waveform-view-start');
     const endInput = $('#waveform-view-end');
-    if (startInput) startInput.value = start.toFixed(1);
-    if (endInput) endInput.value = end.toFixed(1);
+    if (startInput) startInput.value = String(start);
+    if (endInput) endInput.value = String(end);
   }
 
   function setWaveformViewControlsEnabled(enabled, duration = 0) {
@@ -995,11 +1028,13 @@
 
     const endInput = $('#waveform-view-end');
     if (endInput) {
-      endInput.max = enabled ? duration.toFixed(1) : '0';
+      endInput.max = enabled ? String(duration) : '0';
+      endInput.step = 'any';
     }
     const startInput = $('#waveform-view-start');
     if (startInput) {
-      startInput.max = enabled ? duration.toFixed(1) : '0';
+      startInput.max = enabled ? String(duration) : '0';
+      startInput.step = 'any';
     }
   }
 

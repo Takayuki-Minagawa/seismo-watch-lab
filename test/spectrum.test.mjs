@@ -117,6 +117,7 @@ test('invalidating a spectrum chart preserves the input waveform chart', () => {
       destroy() { this.destroyCount += 1; }
     },
   });
+  loadClassicScript('js/utils.js', 'AppUtils', chartContext);
   const { exported: chartSpectrum } = loadClassicScript('js/spectrum.js', 'Spectrum', chartContext);
   chartSpectrum.renderWaveform([0, 1, 0], 0.01, 'input-waveform');
   chartSpectrum.renderSpectrum({
@@ -132,4 +133,23 @@ test('invalidating a spectrum chart preserves the input waveform chart', () => {
   chartSpectrum.clearCharts();
   assert.equal(charts[0].destroyCount, 1);
   assert.equal(charts[1].destroyCount, 1);
+});
+
+test('spectrum input waveform plots preserve isolated peaks and their actual time coordinates', () => {
+  let configuration;
+  const chartContext = createBrowserLikeContext({
+    document: { getElementById: () => ({}) },
+    Chart: class { constructor(_canvas, config) { configuration = config; } },
+  });
+  loadClassicScript('js/utils.js', 'AppUtils', chartContext);
+  const { exported: chartSpectrum } = loadClassicScript('js/spectrum.js', 'Spectrum', chartContext);
+  const acceleration = new Array(8001).fill(0);
+  acceleration[1] = 500;
+  acceleration[2] = -750;
+  chartSpectrum.renderWaveform(acceleration, 0.001, 'input-waveform');
+  const points = configuration.data.datasets[0].data;
+  assert.ok(points.some(point => point.x === 0.001 && point.y === 500));
+  assert.ok(points.some(point => point.x === 0.002 && point.y === -750));
+  assert.equal(points.at(-1).x, 8);
+  assert.equal(configuration.options.scales.x.type, 'linear');
 });

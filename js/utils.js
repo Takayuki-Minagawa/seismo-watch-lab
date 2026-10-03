@@ -41,6 +41,33 @@ const AppUtils = (() => {
     return max;
   }
 
+  // 表示点数を抑えつつ、各区間の正負ピークと元の時刻・両端を残す。
+  function buildPeakPreservingPoints(values, dt, maxPoints, offsetSeconds = 0) {
+    if (!Number.isInteger(maxPoints) || maxPoints < 4) {
+      throw new RangeError('波形の表示点数は4以上の整数にしてください');
+    }
+    const point = index => ({ x: offsetSeconds + index * dt, y: values[index] });
+    if (values.length <= maxPoints) return Array.from(values, (_, index) => point(index));
+
+    const points = [point(0)];
+    const bucketCount = Math.floor((maxPoints - 2) / 2);
+    const interiorCount = values.length - 2;
+    for (let bucket = 0; bucket < bucketCount; bucket++) {
+      const start = 1 + Math.floor(bucket * interiorCount / bucketCount);
+      const end = 1 + Math.floor((bucket + 1) * interiorCount / bucketCount);
+      let minIndex = start;
+      let maxIndex = start;
+      for (let index = start + 1; index < end; index++) {
+        if (values[index] < values[minIndex]) minIndex = index;
+        if (values[index] > values[maxIndex]) maxIndex = index;
+      }
+      points.push(point(Math.min(minIndex, maxIndex)));
+      if (minIndex !== maxIndex) points.push(point(Math.max(minIndex, maxIndex)));
+    }
+    points.push(point(values.length - 1));
+    return points;
+  }
+
   function snapSampleRatio(value) {
     const nearestInteger = Math.round(value);
     const tolerance = Number.EPSILON * Math.max(1, Math.abs(value)) * 16;
@@ -189,6 +216,7 @@ const AppUtils = (() => {
     sanitizeHttpUrl,
     sanitizeUrlForOrigins,
     maxAbs,
+    buildPeakPreservingPoints,
     sampleIndexAtOrAfter,
     sampleIndexAtOrBefore,
     escapeCsvCell,

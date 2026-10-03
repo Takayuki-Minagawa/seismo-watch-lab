@@ -269,6 +269,42 @@ test('reversed adjacent dates report an error without making an API request', as
   assert.equal(h.field('btn-search').disabled, false);
 });
 
+test('unfinished date and numeric entries cannot silently become unbounded searches', async () => {
+  for (const [id, label] of [
+    ['startdate', '開始日'], ['enddate', '終了日'], ['maxdepth', '最大深さ'],
+  ]) {
+    const h = createApp();
+    // Browsers expose an unfinished input (e.g. "1e") as an empty value plus badInput.
+    h.field(id).value = '';
+    h.field(id).validity = { badInput: true };
+    await h.app.executeSearch();
+    assert.equal(h.requests.length, 0, id);
+    assert.match(h.field('error-msg').textContent, new RegExp(label));
+    assert.equal(h.field('btn-search').disabled, false);
+  }
+});
+
+test('form validation checks active region fields without rejecting permitted fractional depths', async () => {
+  const h = createApp();
+  h.field('custom-minlat').validity = { badInput: true };
+  h.field('circle-latitude').validity = { badInput: true };
+  h.field('maxdepth').value = '10.5';
+  h.field('maxdepth').validity = { badInput: false, stepMismatch: true, valid: false };
+  await h.app.executeSearch();
+  h.assertNoError();
+  assert.equal(h.requests[0].url.searchParams.get('maxdepth'), '10.5');
+
+  h.field('region').value = 'custom';
+  await h.app.executeSearch();
+  assert.equal(h.requests.length, 1);
+  assert.match(h.field('error-msg').textContent, /南端緯度/);
+
+  h.field('region').value = 'circle';
+  await h.app.executeSearch();
+  assert.equal(h.requests.length, 1);
+  assert.match(h.field('error-msg').textContent, /中心緯度/);
+});
+
 test('empty results clear prior rows, detail, map, charts, exports and sort indicators', async () => {
   const h = createApp();
   h.responses.push(jsonResponse([
