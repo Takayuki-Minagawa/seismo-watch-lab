@@ -292,25 +292,27 @@
       <!-- 波形ビューアタブ -->
       <div class="tab-content hidden" id="tab-waveform" role="tabpanel" aria-labelledby="tab-btn-waveform" aria-hidden="true">
         <div class="waveform-service-notice" role="note">
-          <strong>IRISの数値波形変換サービスは2026年8月26日に提供を終了しました。</strong>
-          <p>観測点検索と公開メタデータの確認は引き続き利用できます。波形は、計器補正を行い加速度単位を明記したASCII2ファイルを読み込んでください。</p>
-          <a href="https://www.earthscope.org/news/retirement-of-the-irisws-timeseries-web-service/" target="_blank" rel="noopener">EarthScopeの公式告知</a>
-          · <a href="https://github.com/Takayuki-Minagawa/seismo-watch-lab/blob/main/docs/waveform-units.md" target="_blank" rel="noopener">ObsPy補正・ファイル作成手順</a>
+          <strong>観測サイトから波形を取得し、加速度へ変換して表示します。</strong>
+          <p>地震を選択 → 観測点を検索 → 「取得して表示」。FDSN観測網は計器情報から応答を補正し、気象庁は公開済みの加速度を取り込みます。ファイルの準備は不要です。</p>
+          <p>気象庁は公開対象の主な地震に対応します。FDSNは公開データが対象で、配信元の接続制限や未対応の計器情報では取得できない場合があります。</p>
+          <button type="button" class="btn btn-sm btn-outline" id="btn-waveform-example">2011年東北の公開波形を試す</button>
         </div>
-        <div class="waveform-import">
+        <details class="waveform-import">
+          <summary>手元の加速度ファイルも利用できます</summary>
           <label for="waveform-file"><strong>加速度波形ファイル（ASCII2）</strong></label>
           <input type="file" id="waveform-file" accept=".txt,.ascii,.ascii2" aria-describedby="waveform-import-help">
           <p id="waveform-import-help">ヘッダーの明示単位をgalへ換算します（1 m/s² = 100 gal）。COUNTS・速度・変位・単位不明のデータは読み込みません。ヘッダー表記の確認は、計器補正や校正の正しさを保証するものではありません。ファイルは端末内で処理します（上限20 MiB）。</p>
           <div id="waveform-import-status" role="status" aria-live="polite"></div>
-        </div>
+        </details>
         <div class="waveform-controls">
           <div class="form-group">
-            <label for="waveform-eq-label">観測点検索用の地震</label>
+            <label for="waveform-eq-label">選択した地震</label>
             <input type="text" id="waveform-eq-label" readonly placeholder="テーブルから地震を選択" style="min-width:250px;">
           </div>
           <div class="form-group">
             <label for="waveform-datacenter">データセンター</label>
             <select id="waveform-datacenter">
+              <option value="jma">気象庁 公開強震波形 (日本・主な地震)</option>
               <option value="iris" selected>IRIS / EarthScope (グローバル)</option>
               <option value="geofon">GEOFON / GFZ (グローバル・欧州)</option>
               <option value="geonet">GeoNet (ニュージーランド)</option>
@@ -331,16 +333,6 @@
               <option value="20">20°</option>
             </select>
           </div>
-          <div class="form-group hidden" aria-hidden="true">
-            <label for="waveform-filter">旧サービスのフィルタ</label>
-            <select id="waveform-filter">
-              <option value="none" selected>なし (demean)</option>
-              <option value="lp-1">Low-pass 1 Hz</option>
-              <option value="lp-5">Low-pass 5 Hz</option>
-              <option value="hp-0.1">High-pass 0.1 Hz</option>
-              <option value="hp-1">High-pass 1 Hz</option>
-            </select>
-          </div>
           <div class="form-group">
             <label>&nbsp;</label>
             <button class="btn btn-sm btn-primary" id="btn-search-stations">観測点を検索</button>
@@ -351,9 +343,13 @@
               <option value="">-- 先に観測点を検索 --</option>
             </select>
           </div>
-          <div class="form-group hidden" aria-hidden="true">
+          <div class="form-group">
             <label>&nbsp;</label>
-            <button class="btn btn-sm btn-accent" id="btn-show-waveform" disabled>旧サービス（提供終了）</button>
+            <button class="btn btn-sm btn-accent" id="btn-show-waveform" disabled>取得して表示</button>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button class="btn btn-sm btn-outline" id="btn-cancel-waveform" disabled>取得を中止</button>
           </div>
           <div class="form-group">
             <label for="waveform-view-start">表示開始 (秒)</label>
@@ -376,11 +372,18 @@
             <button class="btn btn-sm btn-secondary" id="btn-waveform-spectrum" disabled>応答スペクトル作成</button>
           </div>
         </div>
+        <details class="waveform-import">
+          <summary>補正の詳細設定（FDSN観測網）</summary>
+          <label for="waveform-filter">周波数テーパーの4周波数 (Hz)</label>
+          <input id="waveform-filter" type="text" value="" placeholder="空欄で自動設定" aria-describedby="waveform-filter-help">
+          <p id="waveform-filter-help">自動設定は0.02 / 0.05 / サンプル周波数×0.3 / ×0.4 Hzです。変更する場合は小さい順に4個の数を入力してください（例: 0.02, 0.05, 6, 8）。計算周期は通過帯域とサンプル間隔の範囲に制限します。気象庁の加速度にはこの補正を再適用しません。</p>
+        </details>
+        <p id="waveform-fetch-status" role="status" aria-live="polite"></p>
         <div class="station-summary hidden" id="waveform-station-summary"></div>
         <div class="station-detail hidden" id="waveform-station-detail"></div>
         <div class="waveform-display" id="waveform-display">
           <div class="waveform-placeholder">
-            単位を明記した加速度波形ファイルを読み込んでください
+            地震と観測点を選択し、「取得して表示」を押してください
           </div>
         </div>
       </div>
@@ -388,7 +391,7 @@
       <!-- 応答スペクトルタブ -->
       <div class="tab-content hidden" id="tab-spectrum" role="tabpanel" aria-labelledby="tab-btn-spectrum" aria-hidden="true">
         <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-          波形ビューアに読み込んだ、加速度単位が明示された波形から応答スペクトルを計算します。
+          波形ビューアで取得・変換した加速度波形から応答スペクトルを計算します。
           入力はgal（cm/s²）へ換算済みです。欠測・時刻不連続・単位不明の波形は計算できません。
         </p>
         <div class="spectrum-controls">
@@ -527,7 +530,7 @@
           <h4>データ出典</h4>
           <p>
             地震データ: <a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener">USGS (U.S. Geological Survey)</a> - パブリックドメイン<br>
-            観測点情報: <a href="https://service.earthscope.org/" target="_blank" rel="noopener">EarthScope / FDSN</a>、波形: 読み込んだファイルの出典を参照<br>
+            観測点・波形: <a href="https://service.earthscope.org/" target="_blank" rel="noopener">EarthScope / FDSN</a>、<a href="https://www.data.jma.go.jp/eqev/data/kyoshin/jishin/index.html" target="_blank" rel="noopener">気象庁の公開強震波形</a>ほか（取得元を波形に表示）<br>
             地図タイル: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors (ODbL)<br>
             地図ライブラリ: <a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet</a> (BSD-2-Clause) / グラフ: <a href="https://www.chartjs.org/" target="_blank" rel="noopener">Chart.js</a> (MIT)
           </p>
@@ -571,6 +574,11 @@
   <script src="js/monitor.js"></script>
   <script src="js/detail.js"></script>
   <script src="js/spectrum.js"></script>
+  <script src="vendor/seisplotjs-3.2.7/seedcodec.js" integrity="sha256-mIrYHTnLeljcGDZwG5seOgdFRvGUCWN5G+kEtJJXNis=" crossorigin="anonymous"></script>
+  <script src="js/miniseed.js"></script>
+  <script src="js/instrument-response.js"></script>
+  <script src="js/remote-waveform.js"></script>
+  <script src="js/jma-waveform.js"></script>
   <script src="js/waveform.js"></script>
   <script src="js/app.js"></script>
 

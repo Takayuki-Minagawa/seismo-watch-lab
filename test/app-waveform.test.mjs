@@ -379,3 +379,173 @@ test('a damping edit cancels queued spectrum work before entering the solver', a
   assert.deepEqual(Object.keys(app.state().currentSpectrumResult.results), ['0.1']);
   assert.equal(element('btn-download-spectrum').disabled, false);
 });
+
+function correctedRemoteData(stationId = 'XX.TEST..HNN', amplitude = 100) {
+  const acc = Array.from({ length: 100 }, (_, index) => amplitude * Math.sin(index * Math.PI / 10));
+  return {
+    acc, dt: 0.05,
+    meta: {
+      _dt: 0.05, _sampleRate: 20, _npts: acc.length, _duration: (acc.length - 1) * 0.05,
+      _maxAcc: amplitude, _stationId: stationId, _startTime: '2026-01-01T00:00:00.000000Z',
+      _source: 'Public observation / StationXML correction', _filterLabel: '0.02 / 0.05 / 6 / 8 Hz',
+      _displayUnit: 'gal', _inputUnit: 'm/s²', _inputUnitReported: 'M/S**2', _conversionToGal: 100,
+      _unitVerified: true, _unitEvidence: 'stationxml-response', _responseCorrectionApplied: true,
+      _responseCorrectionRequested: true, _responseUrl: 'https://example.org/fdsnws/station/1/query',
+      _processing: { outputUnits: 'M/S**2', stageCount: 3, preFilter: [0.02, 0.05, 6, 8] },
+      _analysisPeriodMin: 0.5, _analysisPeriodMax: 10, _hasTimingGap: false,
+    },
+  };
+}
+
+function pendingRemoteFetch(WaveformViewer) {
+  const requests = [];
+  WaveformViewer.fetchWaveformData = (station, starttime, endtime, options) => {
+    let resolve, reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise; });
+    requests.push({ station, starttime, endtime, options, resolve, reject });
+    return promise; // Deliberately ignores abort to exercise stale-result protection too.
+  };
+  WaveformViewer.fetchStationPublicInfo = async () => { throw new Error('fixture metadata unavailable'); };
+  return requests;
+}
+
+test('successful remote acquisition enables spectrum calculation and retains processing provenance without file input', async () => {
+  const { app, element, WaveformViewer, runTimers } = loadWaveformApp({ queueTimers: true });
+  const data = correctedRemoteData();
+  let received;
+  WaveformViewer.fetchWaveformData = async (station, starttime, endtime, options) => {
+    received = { station, starttime, endtime, options };
+    options.onProgress('Correcting response');
+    return data;
+  };
+  element('waveform-filter').value = '0.02, 0.05, 6, 8';
+  await element('btn-show-waveform').click();
+
+  assert.equal(element('waveform-file').files, undefined, 'no file selection is required');
+  assert.deepEqual(Array.from(received.options.preFilter), [0.02, 0.05, 6, 8]);
+  assert.equal(app.state().currentWaveformData, data);
+  assert.equal(app.state().spectrumInputData.acc, data.acc);
+  assert.equal(app.state().currentSpectrumResult, null);
+  assert.equal(element('btn-calc-spectrum').disabled, false);
+  assert.equal(element('btn-waveform-spectrum').disabled, false);
+  assert.equal(element('btn-download-spectrum').disabled, true);
+  assert.equal(element('btn-cancel-waveform').disabled, true);
+  assert.match(element('waveform-fetch-status').textContent, /100点.*応答スペクトル/);
+  assert.match(element('spectrum-info').innerHTML, /計器情報からの加速度補正/);
+  await element('btn-calc-spectrum').click();
+  runTimers();
+  const result = app.state().currentSpectrumResult;
+  assert.ok(result);
+  assert.equal(result.meta.pga, 100);
+  assert.equal(result.meta.effectivePeriodMin, 0.5);
+  assert.equal(result.meta.waveform._responseCorrectionApplied, true);
+  assert.equal(result.meta.waveform._processing.stageCount, 3);
+  assert.equal(element('btn-download-spectrum').disabled, false);
+});
+
+test('station or correction-filter changes abort in-flight acquisition and never repopulate from stale progress or completion', async () => {
+  for (const kind of ['station', 'filter']) {
+    const { app, element, charts, WaveformViewer } = loadWaveformApp();
+    const requests = pendingRemoteFetch(WaveformViewer);
+    const pending = element('btn-show-waveform').click();
+    assert.equal(requests.length, 1);
+    assert.equal(element('btn-cancel-waveform').disabled, false);
+    requests[0].options.onProgress('Old request processing');
+    assert.equal(element('waveform-fetch-status').textContent, 'Old request processing');
+    if (kind === 'station') {
+      element('waveform-station').value = JSON.stringify({ network: 'XX', station: 'NEW', location: '', channel: 'HNE', stationKey: 'XX.NEW.--.HNE' });
+      await element('waveform-station').change();
+    } else {
+      element('waveform-filter').value = '0.03, 0.1, 6, 8';
+      await element('waveform-filter').change();
+    }
+    assert.equal(requests[0].options.signal.aborted, true, kind);
+    requests[0].options.onProgress('Late progress must be ignored');
+    requests[0].resolve(correctedRemoteData());
+    await pending;
+    assert.equal(app.state().currentWaveformData, null, kind);
+    assert.equal(app.state().spectrumInputData, null, kind);
+    assert.equal(app.state().currentSpectrumResult, null, kind);
+    assert.equal(element('waveform-fetch-status').textContent, '', kind);
+    assert.equal(element('btn-calc-spectrum').disabled, true, kind);
+    assert.equal(element('btn-download-spectrum').disabled, true, kind);
+    assert.equal(element('btn-cancel-waveform').disabled, true, kind);
+    assert.ok(charts.every(chart => chart.destroyed), kind);
+  }
+});
+
+test('a slow former station cannot overwrite a newer successful remote waveform or its enabled controls', async () => {
+  const { app, element, WaveformViewer } = loadWaveformApp();
+  const requests = pendingRemoteFetch(WaveformViewer);
+  const oldPending = element('btn-show-waveform').click();
+  element('waveform-station').value = JSON.stringify({ network: 'XX', station: 'NEW', location: '', channel: 'HNE', stationKey: 'XX.NEW.--.HNE' });
+  await element('waveform-station').change();
+  const newPending = element('btn-show-waveform').click();
+  const current = correctedRemoteData('XX.NEW..HNE', 25);
+  assert.equal(requests.length, 2);
+  requests[1].resolve(current);
+  await newPending;
+  const status = element('waveform-fetch-status').textContent;
+  requests[0].options.onProgress('Old processing result');
+  requests[0].resolve(correctedRemoteData());
+  await oldPending;
+  assert.equal(app.state().currentWaveformData, current);
+  assert.equal(app.state().spectrumInputData.acc, current.acc);
+  assert.equal(app.state().spectrumInputData.meta._stationId, 'XX.NEW..HNE');
+  assert.equal(element('waveform-fetch-status').textContent, status);
+  assert.equal(element('btn-calc-spectrum').disabled, false);
+  assert.equal(element('btn-show-waveform').disabled, false);
+  assert.equal(element('btn-cancel-waveform').disabled, true);
+});
+
+test('cancel clears waveform and spectrum controls immediately and prevents late remote completion', async () => {
+  const { app, element, charts, WaveformViewer } = loadWaveformApp();
+  const requests = pendingRemoteFetch(WaveformViewer);
+  const pending = element('btn-show-waveform').click();
+  assert.equal(element('btn-show-waveform').disabled, true);
+  await element('btn-cancel-waveform').click();
+  assert.equal(requests[0].options.signal.aborted, true);
+  assert.equal(app.state().currentWaveformData, null);
+  assert.equal(app.state().spectrumInputData, null);
+  assert.equal(app.state().currentSpectrumResult, null);
+  assert.equal(element('btn-cancel-waveform').disabled, true);
+  assert.equal(element('btn-show-waveform').disabled, false);
+  assert.equal(element('btn-apply-waveform-view').disabled, true);
+  assert.equal(element('btn-waveform-spectrum').disabled, true);
+  assert.equal(element('btn-calc-spectrum').disabled, true);
+  assert.equal(element('btn-download-spectrum').disabled, true);
+  assert.match(element('waveform-fetch-status').textContent, /中止/);
+  requests[0].options.onProgress('Too late');
+  requests[0].resolve(correctedRemoteData());
+  await pending;
+  assert.equal(app.state().currentWaveformData, null);
+  assert.equal(app.state().spectrumInputData, null);
+  assert.match(element('waveform-fetch-status').textContent, /中止/);
+  assert.ok(charts.every(chart => chart.destroyed));
+});
+
+test('low-rate remote records remain viewable while an empty usable period range disables and explains spectrum calculation', async () => {
+  const { app, element, WaveformViewer, Spectrum, toasts, runTimers } = loadWaveformApp({ queueTimers: true });
+  const data = correctedRemoteData('XX.TEST..LHZ');
+  data.dt = 1;
+  Object.assign(data.meta, { _dt: 1, _sampleRate: 1, _duration: 99, _analysisPeriodMin: 10, _analysisPeriodMax: 10,
+    _filterLabel: '0.02 / 0.05 / 0.3 / 0.4 Hz' });
+  WaveformViewer.fetchWaveformData = async () => data;
+  await element('btn-show-waveform').click();
+  assert.equal(app.state().currentWaveformData, data);
+  assert.equal(app.state().spectrumInputData.acc, data.acc);
+  assert.equal(element('btn-apply-waveform-view').disabled, false);
+  assert.equal(element('btn-waveform-spectrum').disabled, true);
+  assert.equal(element('btn-calc-spectrum').disabled, true);
+  assert.equal(element('btn-download-spectrum').disabled, true);
+  assert.match(element('spectrum-info').innerHTML, /周期/);
+  assert.match(element('waveform-fetch-status').textContent, /周期/);
+  assert.doesNotMatch(element('waveform-fetch-status').textContent, /応答スペクトルを計算できます/);
+  let calculations = 0;
+  Spectrum.computeSpectrum = () => { calculations++; throw new Error('must not enter solver'); };
+  app.calculateSpectrumForLoadedData(); // Defensive guard also covers programmatic callers.
+  runTimers();
+  assert.equal(calculations, 0);
+  assert.equal(app.state().currentSpectrumResult, null);
+  assert.match(toasts.at(-1), /周期/);
+});

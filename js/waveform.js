@@ -1,9 +1,8 @@
 /**
- * waveform.js - IRIS波形ビューアモジュール
- * 波形ヘッダーで加速度単位を確認し、galに換算して表示
+ * waveform.js - 観測サイト波形ビューアモジュール
+ * 公開波形・計器情報から加速度を取得し、galで表示
  */
 const WaveformViewer = (() => {
-  const TIMESERIES_URL = 'https://service.iris.edu/irisws/timeseries/1/query';
   const MAX_PLOT_POINTS = 4000;
   const STATION_PREVIEW_CONCURRENCY = 4;
   const STATION_PREVIEW_LIMIT = 12;
@@ -17,47 +16,57 @@ const WaveformViewer = (() => {
       label: 'IRIS / EarthScope',
       region: 'グローバル',
       stationUrl: 'https://service.earthscope.org/fdsnws/station/1/query',
+      dataUrl: 'https://service.earthscope.org/fdsnws/dataselect/1/query',
     },
     geofon: {
       label: 'GEOFON (GFZ)',
       region: 'グローバル・欧州',
-      stationUrl: 'https://geofon.gfz-potsdam.de/fdsnws/station/1/query',
+      stationUrl: 'https://geofon.gfz.de/fdsnws/station/1/query',
+      dataUrl: 'https://geofon.gfz.de/fdsnws/dataselect/1/query',
     },
     geonet: {
       label: 'GeoNet',
       region: 'ニュージーランド',
       stationUrl: 'https://service.geonet.org.nz/fdsnws/station/1/query',
+      dataUrl: 'https://service.geonet.org.nz/fdsnws/dataselect/1/query',
     },
     ncedc: {
       label: 'NCEDC',
       region: '北カリフォルニア',
       stationUrl: 'https://service.ncedc.org/fdsnws/station/1/query',
+      dataUrl: 'https://service.ncedc.org/fdsnws/dataselect/1/query',
     },
     scedc: {
       label: 'SCEDC',
       region: '南カリフォルニア',
       stationUrl: 'https://service.scedc.caltech.edu/fdsnws/station/1/query',
+      dataUrl: 'https://service.scedc.caltech.edu/fdsnws/dataselect/1/query',
     },
     orfeus: {
       label: 'ORFEUS (ODC)',
       region: '欧州',
       stationUrl: 'https://www.orfeus-eu.org/fdsnws/station/1/query',
+      dataUrl: 'https://www.orfeus-eu.org/fdsnws/dataselect/1/query',
     },
     ingv: {
       label: 'INGV',
       region: 'イタリア',
       stationUrl: 'https://webservices.ingv.it/fdsnws/station/1/query',
+      dataUrl: 'https://webservices.ingv.it/fdsnws/dataselect/1/query',
     },
     resif: {
       label: 'RESIF',
       region: 'フランス',
       stationUrl: 'https://ws.resif.fr/fdsnws/station/1/query',
+      dataUrl: 'https://ws.resif.fr/fdsnws/dataselect/1/query',
     },
     ethz: {
       label: 'ETH Zürich',
       region: 'スイス',
       stationUrl: 'https://eida.ethz.ch/fdsnws/station/1/query',
+      dataUrl: 'https://eida.ethz.ch/fdsnws/dataselect/1/query',
     },
+    jma: { label: '気象庁 公開強震波形', region: '日本・主な地震' },
   };
 
   let stationData = [];
@@ -76,6 +85,11 @@ const WaveformViewer = (() => {
    */
   async function searchStations(lat, lon, maxRadius = 5, eventTime = null, options = {}) {
     const dcId = options.datacenter || 'iris';
+    if (dcId === 'jma') {
+      const result = await JmaWaveform.searchStations(lat, lon, maxRadius, eventTime, options);
+      stationData = result.stations;
+      return result;
+    }
     const dc = FDSN_DATACENTERS[dcId] || FDSN_DATACENTERS.iris;
     const searchUrl = dc.stationUrl;
 
@@ -416,14 +430,14 @@ const WaveformViewer = (() => {
     uniqueStations.forEach((channels, key) => {
       const first = channels[0];
       const group = document.createElement('optgroup');
-      const distanceText = Number.isFinite(first.distanceKm) ? `${first.distanceKm.toFixed(1)} km` : '? km';
-      group.label = `${key} / ${distanceText}`;
+      const distanceText = Number.isFinite(first.distanceKm) ? `${first.distanceKm.toFixed(1)} km` : '距離情報なし';
+      group.label = `${first.name || key} / ${distanceText}`;
 
       channels.forEach(channel => {
         const opt = document.createElement('option');
         opt.value = JSON.stringify(channel);
         opt.dataset.stationKey = channel.stationKey;
-        opt.textContent = `${channel.channel} [${channel.location || '--'}] / ${formatDistance(channel.distanceKm)} / ${formatMaxAcc(channel.previewMaxAcc, channel.previewUnit)}`;
+        opt.textContent = `${channel.channel} [${channel.location || '--'}] / ${formatDistance(channel.distanceKm)} / ${channel.name || formatMaxAcc(channel.previewMaxAcc, channel.previewUnit)}`;
         group.appendChild(opt);
       });
 
@@ -431,54 +445,17 @@ const WaveformViewer = (() => {
     });
   }
 
-  function getWaveformDataURL(station, starttime, endtime, options = {}) {
-    const params = buildWaveformParams(station, starttime, endtime, options, 'ascii2');
-    return `${TIMESERIES_URL}?${params.toString()}`;
+  function getWaveformDataURL(station, starttime, endtime) {
+    if (station._datacenter === 'jma') return station._csvUrl || '';
+    const dc = FDSN_DATACENTERS[station._datacenter || 'iris'];
+    if (!dc?.dataUrl) throw new Error('波形配信先が不明です');
+    const params = new URLSearchParams({ net: station.network, sta: station.station,
+      loc: station.location || '--', cha: station.channel,
+      starttime: normalizeIRISTimeValue(starttime), endtime: normalizeIRISTimeValue(endtime), nodata: '404' });
+    return `${dc.dataUrl}?${params}`;
   }
 
-  function getWaveformImageURL(station, starttime, endtime, options = {}) {
-    const params = buildWaveformParams(station, starttime, endtime, options, 'plot');
-    params.set('width', String(options.width || 1000));
-    params.set('height', String(options.height || 300));
-    return `${TIMESERIES_URL}?${params.toString()}`;
-  }
-
-  function buildWaveformParams(station, starttime, endtime, options = {}, format = 'ascii2') {
-    const params = new URLSearchParams();
-    params.append('net', station.network);
-    params.append('sta', station.station);
-    params.append('loc', station.location || '--');
-    params.append('cha', station.channel);
-    params.append('starttime', normalizeIRISTimeValue(starttime));
-    params.append('endtime', normalizeIRISTimeValue(endtime));
-    params.append('taper', '0.05');
-    params.append('demean', 'true');
-    params.append('correct', 'true');
-    params.append('units', 'ACC');
-
-    applyFilterPreset(params, options.filterPreset);
-    params.append('format', format);
-    return params;
-  }
-
-  function applyFilterPreset(params, filterPreset = 'none') {
-    switch (filterPreset) {
-      case 'lp-1':
-        params.set('lpfilter', '1');
-        break;
-      case 'lp-5':
-        params.set('lpfilter', '5');
-        break;
-      case 'hp-0.1':
-        params.set('hpfilter', '0.1');
-        break;
-      case 'hp-1':
-        params.set('hpfilter', '1');
-        break;
-      default:
-        break;
-    }
-  }
+  function getWaveformImageURL() { return ''; }
 
   function getFilterLabel(filterPreset = 'none') {
     switch (filterPreset) {
@@ -547,34 +524,12 @@ const WaveformViewer = (() => {
       return waveformDataCache.get(cacheKey);
     }
 
-    const dataUrl = getWaveformDataURL(station, starttime, endtime, options);
-    const plotUrl = getWaveformImageURL(station, starttime, endtime, options);
-    const { response: resp, text } = await AppUtils.fetchTextWithTimeout(dataUrl, {
-      cache: 'no-store',
-      signal: options.signal,
-      timeoutMs: options.timeoutMs || 30000,
-      timeoutMessage: '波形取得がタイムアウトしました',
-    });
-
-    if (!resp.ok) {
-      throwIfServiceRetired(resp.status, text);
-      if (resp.status === 404) {
-        throw new Error('この観測点・時間帯の波形データは見つかりませんでした');
-      }
-      throw new Error(`波形取得エラー (HTTP ${resp.status})`);
-    }
-
-    const data = parseWaveformText(text, {
-      station,
-      starttime,
-      endtime,
-      dataUrl,
-      plotUrl,
-      filterPreset: options.filterPreset || 'none',
-      requestedUnit: 'ACC',
-      responseCorrected: true,
-      sourceName: 'IRIS / EarthScope 波形（ヘッダーで加速度単位を確認）',
-    });
+    const data = station._datacenter === 'jma'
+      ? await JmaWaveform.fetchWaveformData(station, starttime, endtime, options)
+      : await RemoteWaveform.load(station, normalizeIRISTimeValue(starttime), normalizeIRISTimeValue(endtime),
+        FDSN_DATACENTERS[station._datacenter || 'iris'], options);
+    if (options.signal?.aborted) throw options.signal.reason || new DOMException('Aborted', 'AbortError');
+    validateAccelerationData(data);
     setWaveformCache(cacheKey, data);
     return data;
   }
@@ -590,6 +545,8 @@ const WaveformViewer = (() => {
 
   function getWaveformCacheKey(station, starttime, endtime, options = {}) {
     return [
+      station._datacenter || 'iris',
+      JSON.stringify(options.preFilter || null),
       station.stationKey || `${station.network}.${station.station}.${station.location || '--'}.${station.channel}`,
       normalizeIRISTimeValue(starttime),
       normalizeIRISTimeValue(endtime),
@@ -836,7 +793,10 @@ const WaveformViewer = (() => {
   function validateAccelerationData(data) {
     const meta = data?.meta;
     const unitInfo = getAccelerationUnitInfo(meta?._inputUnitReported);
-    if (!meta || meta._unitVerified !== true || meta._unitEvidence !== 'header'
+    const validEvidence = meta?._unitEvidence === 'header' || (meta?._unitEvidence === 'stationxml-response'
+      && meta._responseCorrectionApplied === true && meta._processing?.outputUnits === 'M/S**2'
+      && Boolean(AppUtils.sanitizeHttpUrl(meta._responseUrl)));
+    if (!meta || meta._unitVerified !== true || !validEvidence
         || meta._displayUnit !== 'gal' || !unitInfo
         || meta._inputUnit !== unitInfo.inputLabel || meta._conversionToGal !== unitInfo.toGalFactor) {
       throw new TypeError('波形の加速度単位とgalへの換算根拠を確認できません');
@@ -872,7 +832,7 @@ const WaveformViewer = (() => {
     const originTime = new Date(feature.properties.time);
     const mag = feature.properties.mag || 5;
 
-    const durationMinutes = Math.max(5, Math.min(30, mag * 3));
+    const durationMinutes = Math.max(5, Math.min(12, mag * 2));
     const preSeconds = 60;
 
     const start = new Date(originTime.getTime() - preSeconds * 1000);
@@ -960,9 +920,12 @@ const WaveformViewer = (() => {
     );
     const canvasId = `${containerId}-canvas`;
     const dataUrl = AppUtils.sanitizeHttpUrl(data.meta._dataUrl);
+    const sourcePageUrl = AppUtils.sanitizeHttpUrl(data.meta._sourcePageUrl);
     const plotUrl = AppUtils.sanitizeHttpUrl(data.meta._plotUrl);
     const sourceLinks = [
-      dataUrl ? `<a href="${escapeHtml(dataUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">ASCII2</a>` : '',
+      dataUrl ? `<a href="${escapeHtml(dataUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">元データ</a>` : '',
+      sourcePageUrl ? `<a href="${escapeHtml(sourcePageUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">公開元の説明</a>` : '',
+      data.meta._responseUrl ? `<a href="${escapeHtml(AppUtils.sanitizeHttpUrl(data.meta._responseUrl))}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">計器情報</a>` : '',
       plotUrl ? `<a href="${escapeHtml(plotUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">IRISプロット</a>` : '',
     ].filter(Boolean).join(' ');
 
@@ -983,11 +946,12 @@ const WaveformViewer = (() => {
         <span>${escapeHtml(data.meta._source)} / 入力単位: ${escapeHtml(data.meta._inputUnitReported || '?')} / 表示単位: ${escapeHtml(data.meta._displayUnit || 'gal')}</span>
         <span>換算: 入力値 (${escapeHtml(data.meta._inputUnit || '?')}) × ${escapeHtml(data.meta._conversionToGal ?? '?')} = gal</span>
         <span>元ヘッダー: ${escapeHtml(data.meta._rawHeader || '不明')}</span>
-        <span>ヘッダーの単位表記を確認しています。計器補正・校正の実施や精度を検証したものではありません。</span>
+        <span>${data.meta._responseCorrectionApplied ? '公開された計器情報の応答段を補正し、加速度へ変換しました。周波数テーパーの範囲を確認してください。' : 'ヘッダーの単位表記を確認しています。計器補正・校正の実施や精度を検証したものではありません。'}</span>
         <span>
           ${sourceLinks}
         </span>
       </div>
+      ${(data.meta._sourceNotices || []).length ? `<div class="waveform-error">${data.meta._sourceNotices.map(escapeHtml).join('<br>')}</div>` : ''}
       ${data.meta._hasTimingGap ? `<div class="waveform-error" role="status">
         時刻不連続・精度不足または未対応サンプリングを検出したため、応答スペクトルは計算できません。横軸はヘッダーのサンプリング間隔で表示しています。
         <ul>${(data.meta._timingIssues || []).map(issue => `<li>${escapeHtml(issue)}</li>`).join('')}</ul>
@@ -1085,7 +1049,7 @@ const WaveformViewer = (() => {
 
     container.innerHTML = `
       <div class="waveform-placeholder">
-        加速度単位が明記されたASCII2波形ファイルを読み込んでください
+        地震と観測点を選択し、「取得して表示」を押してください
       </div>
     `;
   }

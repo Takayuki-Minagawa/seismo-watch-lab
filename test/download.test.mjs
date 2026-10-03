@@ -137,16 +137,16 @@ test('spectrum provenance is appended after numeric columns and repeats for ever
   assert.deepEqual(header.slice(0, 3), ['period_s', 'Sa_gal_h5.00pct', 'Sa_gal_h10.00pct']);
   assert.deepEqual(header.slice(3), [
     'waveform_station_id', 'waveform_start_utc', 'input_unit', 'conversion_to_gal',
-    'unit_evidence', 'waveform_source', 'waveform_url', 'processing',
-    'response_correction_requested', 'raw_header',
+    'unit_evidence', 'waveform_source', 'waveform_url', 'response_url', 'raw_data_format', 'source_notices', 'processing',
+    'response_correction_requested', 'response_correction_applied', 'raw_header',
     'evaluation_start_s', 'evaluation_end_s', 'header_unit_verified',
   ]);
   assert.deepEqual(first.slice(0, 3), ['0', '10', '10']);
   assert.deepEqual(second.slice(0, 3), ['0.1', '20', '15']);
   assert.deepEqual(first.slice(3), [
     waveform._stationId, waveform._startTime, waveform._inputUnitReported, '100',
-    waveform._unitEvidence, waveform._source, waveform._dataUrl, JSON.stringify(waveform._processing),
-    'true', waveform._rawHeader, '0', '12.5', 'true',
+    waveform._unitEvidence, waveform._source, waveform._dataUrl, '', '', '', JSON.stringify(waveform._processing),
+    'true', '', waveform._rawHeader, '0', '12.5', 'true',
   ]);
   assert.deepEqual(second.slice(3), first.slice(3));
   assert.equal(first.length, header.length);

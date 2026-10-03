@@ -592,9 +592,18 @@
     $('#waveform-file')?.addEventListener('change', importWaveformFile);
 
     stationSel.addEventListener('change', onWaveformStationSelectionChange);
-    filterSel.addEventListener('change', () => handleStationSearchCriteriaChange('フィルタ'));
+    filterSel.addEventListener('change', invalidateWaveformForStationChange);
     datacenterSel.addEventListener('change', () => handleStationSearchCriteriaChange('データセンター'));
     radiusSel.addEventListener('change', () => handleStationSearchCriteriaChange('検索半径'));
+    $('#btn-waveform-example')?.addEventListener('click', () => {
+      // JMA's published origin, also used to identify the public strong-motion event page.
+      selectFeatureForWaveform({ type: 'Feature', id: 'jma-201103111446',
+        properties: { time: Date.parse('2011-03-11T05:46:18Z'), mag: 9.0, place: '2011年東北地方太平洋沖地震' },
+        geometry: { type: 'Point', coordinates: [142.86, 38.1033, 24] } });
+      datacenterSel.value = 'jma';
+      radiusSel.value = '20';
+      btnSearch.click();
+    });
 
     btnSearch.addEventListener('click', async () => {
       if (!selectedFeature) {
@@ -697,16 +706,29 @@
       waveformInputMode = 'remote';
       const requestedStationKey = station.stationKey;
       const requestedFilter = filterSel.value;
+      invalidateLoadedWaveform();
+      waveformInputMode = 'remote';
       btnShow.disabled = true;
-      btnShow.textContent = '取得中...';
+      btnShow.textContent = '取得・変換中…';
       const request = waveformRequests.begin();
+      const fetchStatus = $('#waveform-fetch-status');
+      const btnCancel = $('#btn-cancel-waveform');
+      if (btnCancel) btnCancel.disabled = false;
 
       try {
+        const preFilter = (station._datacenter === 'jma' || !requestedFilter || ['auto', 'none'].includes(requestedFilter)) ? undefined
+          : requestedFilter.split(/[,\s]+/).filter(Boolean).map(Number);
+        if (preFilter && (preFilter.length !== 4 || preFilter.some((value, index) =>
+          !Number.isFinite(value) || value <= 0 || (index > 0 && value <= preFilter[index - 1])))) {
+          throw new Error('補正の周波数は、小さい順に4個の正の数を指定してください');
+        }
         const waveformData = await WaveformViewer.fetchWaveformData(
           station,
           timeWindow.starttime,
           timeWindow.endtime,
-          { filterPreset: requestedFilter, signal: request.signal }
+          { preFilter, signal: request.signal, onProgress: message => {
+            if (request.isCurrent() && fetchStatus) fetchStatus.textContent = message;
+          } }
         );
         const activeStation = getSelectedWaveformStation();
         if (
@@ -723,7 +745,8 @@
         setWaveformViewControlsEnabled(true, currentWaveformView.end);
         updateWaveformViewInputs(currentWaveformView.start, currentWaveformView.end);
         syncWaveformToSpectrum();
-        Settings.showToast('ヘッダーの加速度単位を確認し、galへ換算しました');
+        if (fetchStatus) fetchStatus.textContent = `${currentWaveformData.meta._source}：${currentWaveformData.meta._npts}点を表示しました。${spectrumUnavailableReason(currentWaveformData) || '応答スペクトルを計算できます。'}`;
+        Settings.showToast('波形の取得・加速度への変換が完了しました');
       } catch (err) {
         if (!request.isCurrent() || AppUtils.isAbortError(err)) return;
         currentWaveformData = null;
@@ -731,14 +754,22 @@
         setWaveformViewControlsEnabled(false);
         WaveformViewer.resetDisplay('waveform-display');
         resetSpectrumState();
+        if (fetchStatus) fetchStatus.textContent = `取得できませんでした：${err.message}`;
         Settings.showToast(`波形取得エラー: ${err.message}`);
       } finally {
         if (request.isCurrent()) {
           btnShow.disabled = false;
-          btnShow.textContent = '波形を表示';
+          btnShow.textContent = '取得して表示';
+          if (btnCancel) btnCancel.disabled = true;
         }
         waveformRequests.finish(request.id);
       }
+    });
+
+    $('#btn-cancel-waveform')?.addEventListener('click', () => {
+      invalidateLoadedWaveform();
+      const status = $('#waveform-fetch-status');
+      if (status) status.textContent = '波形の取得・変換を中止しました。';
     });
 
     btnApplyView.addEventListener('click', () => {
@@ -826,9 +857,8 @@
     if (info) {
       info.style.display = '';
       info.innerHTML = buildSpectrumInfoHtml(data.meta, sourceLabel);
-      if (data.meta?._hasTimingGap) {
-        info.innerHTML += '<div class="spectrum-warning">欠測または不連続な時刻を検出したため、応答スペクトル計算を停止しました。</div>';
-      }
+      const reason = spectrumUnavailableReason(data);
+      if (reason) info.innerHTML += `<div class="spectrum-warning">${escapeHtml(reason)}</div>`;
     }
   }
 
@@ -839,8 +869,8 @@
     parts.push(`サンプリング間隔: ${meta._dt.toFixed(4)}秒`);
     parts.push(`継続時間: ${meta._duration.toFixed(3)}秒`);
     parts.push(`最大加速度: ${meta._maxAcc.toFixed(2)} gal`);
-    parts.push(`単位根拠: ヘッダー ${escapeHtml(meta._inputUnitReported || '')} / 値 × ${meta._conversionToGal} → gal`);
-    parts.push('計器補正・校正の正しさは未検証');
+    parts.push(`単位根拠: ${meta._responseCorrectionApplied ? '計器情報からの加速度補正' : 'ヘッダー'} ${escapeHtml(meta._inputUnitReported || '')} / 値 × ${meta._conversionToGal} → gal`);
+    if (!meta._responseCorrectionApplied) parts.push('計器補正・校正の正しさは未検証');
     if (meta._startTime) parts.push(`記録開始 (UTC): ${escapeHtml(meta._startTime)}`);
 
     if (meta['Station Code']) parts.push(`観測点: ${escapeHtml(meta['Station Code'])}`);
@@ -857,12 +887,20 @@
     return parts.join(' / ');
   }
 
+  function spectrumUnavailableReason(data) {
+    if (data?.meta?._hasTimingGap) return '欠測または不連続な時刻を検出したため、応答スペクトルは計算できません。';
+    const min = Math.max(data?.meta?._analysisPeriodMin || 0.02, 10 * (data?.dt || 0));
+    const max = data?.meta?._analysisPeriodMax || 10;
+    if (min >= max) return 'サンプル間隔または補正帯域から有効な計算周期を確保できません。別のチャンネルまたは補正設定を選んでください。';
+    return '';
+  }
+
   function invalidateSpectrumResult() {
     currentSpectrumResult = null;
     spectrumCalculationSeq += 1;
     Spectrum.clearSpectrumChart();
     const btnCalc = $('#btn-calc-spectrum');
-    if (btnCalc) btnCalc.disabled = !spectrumInputData || Boolean(spectrumInputData.meta?._hasTimingGap);
+    if (btnCalc) btnCalc.disabled = !spectrumInputData || Boolean(spectrumUnavailableReason(spectrumInputData));
     const btnDownload = $('#btn-download-spectrum');
     if (btnDownload) btnDownload.disabled = true;
     const summary = $('#spectrum-summary');
@@ -873,7 +911,7 @@
     // 入力変更・再計算の失敗後に、以前の条件の結果を出力できないようにする。
     invalidateSpectrumResult();
     if (!spectrumInputData) {
-      Settings.showToast('先に波形ビューアで加速度波形ファイルを読み込んでください');
+      Settings.showToast('先に波形ビューアで波形を取得してください');
       return;
     }
     try {
@@ -883,8 +921,9 @@
       Settings.showToast(`単位・データ検証エラー: ${err.message}`);
       return;
     }
-    if (spectrumInputData.meta?._hasTimingGap) {
-      Settings.showToast('波形に欠測または時刻の不連続があるため計算できません');
+    const unavailableReason = spectrumUnavailableReason(spectrumInputData);
+    if (unavailableReason) {
+      Settings.showToast(unavailableReason);
       return;
     }
 
@@ -912,8 +951,8 @@
       try {
         const result = Spectrum.computeSpectrum(inputData.acc, inputData.dt, {
           hList: dampings,
-          periodMin: 0.02,
-          periodMax: 10.0,
+          periodMin: inputData.meta?._analysisPeriodMin || 0.02,
+          periodMax: inputData.meta?._analysisPeriodMax || 10.0,
           periodCount: 100,
           samplesPerPeriod: 10,
           evaluationStart: inputData.meta?._analysisWindowStart,
@@ -1024,7 +1063,7 @@
       });
 
     const spectrumButton = $('#btn-waveform-spectrum');
-    if (spectrumButton && enabled) spectrumButton.disabled = Boolean(currentWaveformData?.meta?._hasTimingGap);
+    if (spectrumButton && enabled) spectrumButton.disabled = Boolean(spectrumUnavailableReason(currentWaveformData));
 
     const endInput = $('#waveform-view-end');
     if (endInput) {
@@ -1056,7 +1095,7 @@
     const btnShow = $('#btn-show-waveform');
     if (btnShow) {
       btnShow.disabled = false;
-      btnShow.textContent = '波形を表示';
+      btnShow.textContent = '取得して表示';
     }
 
     const stationSummary = $('#waveform-station-summary');
@@ -1079,6 +1118,10 @@
     waveformInputMode = null;
     const status = $('#waveform-import-status');
     if (status) status.textContent = '';
+    const fetchStatus = $('#waveform-fetch-status');
+    if (fetchStatus) fetchStatus.textContent = '';
+    const btnCancel = $('#btn-cancel-waveform');
+    if (btnCancel) btnCancel.disabled = true;
     currentWaveformData = null;
     currentWaveformView = { start: 0, end: null };
     updateWaveformViewInputs(0, 0);
@@ -1089,7 +1132,7 @@
     const btnShow = $('#btn-show-waveform');
     if (btnShow) {
       btnShow.disabled = !getSelectedWaveformStation();
-      btnShow.textContent = '波形を表示';
+      btnShow.textContent = '取得して表示';
     }
   }
 
@@ -1133,7 +1176,7 @@
     const info = $('#spectrum-info');
     if (info) {
       info.style.display = '';
-      info.innerHTML = '波形ビューアで単位付き加速度ファイルを読み込むと、ここに入力単位・換算・観測点の情報が表示されます。';
+      info.innerHTML = '波形ビューアで観測点を選び「取得して表示」を押すと、ここに入力波形の情報が表示されます。';
     }
   }
 
@@ -1149,7 +1192,7 @@
 
     if (!stations.length) {
       const noResultReason = candidateCount > 0
-        ? `候補 ${candidateCount} 件のうち近傍 ${checkedCount} チャンネルを確認しましたが、IRIS経由で波形取得可能な観測点はありませんでした。`
+        ? `候補 ${candidateCount} 件のうち近傍 ${checkedCount} チャンネルを確認しましたが、選択した配信元で波形取得可能な観測点はありませんでした。`
         : '周辺に観測点が見つかりませんでした。検索半径やデータセンターを変更してお試しください。';
       const dcInfo = dcLabel ? ` <span style="font-size:0.8rem; color:var(--text-secondary);">(${escapeHtml(dcLabel)})</span>` : '';
       container.innerHTML = `
@@ -1233,6 +1276,14 @@
 
     const station = getSelectedWaveformStation();
     if (!station || !selectedFeature) {
+      stationInfoRequests.cancel();
+      resetWaveformStationDetail();
+      return;
+    }
+
+    const btnShow = $('#btn-show-waveform');
+    if (btnShow) btnShow.disabled = false;
+    if (station._datacenter === 'jma') {
       stationInfoRequests.cancel();
       resetWaveformStationDetail();
       return;

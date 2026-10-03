@@ -24,3 +24,6 @@ package-lock.json
 .venv-waveform/
 __pycache__/
 *.pyc
+
+# Local waveform verification artifacts
+outputs/

@@ -60,19 +60,23 @@
 - マグニチュード vs 深さ（散布図）
 
 ### 応答スペクトル計算
-- 波形ビューアに読み込んだ、明示的な加速度単位を持つASCII2ファイルを入力に利用（端末内で処理）
+- 観測サイトから取得・変換した加速度波形を、そのまま入力に利用（端末内で処理）
+- 手元の単位付きASCII2加速度ファイルも利用可能
 - Newmark-β法による応答スペクトル計算
 - 入力波形と計算結果スペクトルの表示
 - 減衰定数の設定（複数指定可）
 - 減衰定数を編集した場合は以前の計算結果・CSV出力を無効化し、再計算後に出力
 - Sa（加速度）・Sv（速度）・Sd（変位）の3種類の出力
 - 入力刻みに対して1周期10点を確保する有効最短周期 `max(0.02秒, 10Δt)` の自動適用
+- FDSN波形では応答補正の通過帯域に合わせて計算周期をさらに制限
 - 選択区間より前から応答を積分し、区間開始時の変位・速度状態を継承
 - 欠測・時刻不連続を検出した波形では計算を停止
 - PGA・ピーク応答・有効周期範囲の要約と、応答スペクトルCSV出力
 
-### FDSN波形ビューア（マルチデータセンター対応）
-- 複数のFDSN準拠データセンターから観測点を検索可能
+### 波形ビューア（観測サイトから自動取得・変換）
+- **気象庁**: 公式の公開強震記録一覧と選択した地震を照合し、観測点のCSVを直接取得。南北・東西・上下の成分、gal単位、記録日時を検証して表示
+- **FDSN観測網**: 選択した観測点のraw miniSEEDと全応答段を含むStationXMLを取得し、ブラウザ内で計器応答を補正して加速度へ変換
+- FDSN取得先として次のデータセンターを選択可能（各配信元の接続制限・公開範囲に依存）
   - **IRIS / EarthScope** (グローバル)
   - **GEOFON / GFZ** (グローバル・欧州)
   - **GeoNet** (ニュージーランド)
@@ -86,17 +90,21 @@
 - 観測点を震央距離順にソートし、近い観測点を優先表示
 - 強震加速度計（HN/BN/EN）と広帯域・高サンプリング速度計（HH/BH）を検索し、同距離では強震・水平成分を優先
 - 観測点のメタデータを検索（波形の存在・取得可否とは区別）
-- 単位付きASCII2ファイルを読み込み、gal（cm/s²）に換算して表示（20 MiBまで）
-- ヘッダーの単位・換算係数・原文・観測点ID・UTC開始日時を確認可能
-- `COUNTS`、速度、変位、単位不明、不正な数値は拒否。`FLOAT` や `units=ACC` 要求を単位の根拠にしない
-- ヘッダー表記の確認と、計器補正・校正の検証を区別（アプリは後者を検証しない）
+- 「取得して表示」で取得・変換を実行し、処理状況の表示と中止に対応。ファイルの事前準備やPython環境は不要
+- FDSNの取得範囲は地震発生60秒前から、規模に応じて発生後5〜12分まで。気象庁は公開された記録全体を取得
+- FDSN補正の既定値は平均除去・時間テーパー合計5%（両端各2.5%）・周波数テーパー `0.02 / 0.05 / 0.3fs / 0.4fs Hz`。4周波数は詳細設定で変更可能（fsはサンプル周波数）
+- 補正後のSI加速度（m/s²）を100倍してgal（cm/s²）へ換算。気象庁の公開加速度には計器補正を再適用しない
+- 欠測・重複・累積時刻の不整合、観測点の不一致、応答段の不足・未対応形式、不明な単位は処理を停止。自動取得は50万点・1000 Hzまで
+- 単位・換算係数・原文ヘッダー・観測点ID・UTC開始日時・取得元を表示。公開元のデータ品質に関する注意事項も表示
 - 観測点の総合感度 `Scale`、基準周波数 `ScaleFrequency` / `ScaleFreq`、入力単位 `ScaleUnits` を説明付きで表示
-- 公開StationXMLと読み込んだ波形の関係は処理記録で確認。補正済み加速度に感度を再適用しない
+- 手元の単位付きASCII2ファイルも読み込み可能（20 MiBまで）。ファイルの`COUNTS`・速度・変位は受け付けず、ヘッダーだけから計器補正の実施を推測しない
 - 表示開始・終了秒を指定したズーム表示、選択区間から応答スペクトルを作成
 - ズーム範囲の小数秒を保持し、長い波形の表示点数を減らす場合も各区間の正負ピークを保持（スペクトル計算には元の全サンプルを使用）
-- スペクトルCSVに元波形の単位・換算・時刻・観測点・ヘッダー・由来を保存
+- スペクトルCSVに元波形の単位・換算・時刻・観測点・ヘッダー・取得URL・補正方法を保存
 
-> **提供状況（2026-09-30確認）**: IRISの数値波形変換サービス `irisws-timeseries` は2026年8月26日に終了しました。現在はFDSN観測点検索と、単位付きファイルの読込を利用します。生miniSEEDとStationXMLからObsPyで加速度を作成する手順は[波形の単位・補正ガイド](docs/waveform-units.md)を参照してください。[EarthScope公式告知](https://www.earthscope.org/news/retirement-of-the-irisws-timeseries-web-service/)
+> IRISの旧変換サービス `irisws-timeseries` は2026年8月26日に終了しました。本アプリはFDSNのraw波形と計器情報を取得して変換する方式へ移行しています。[EarthScope公式告知](https://www.earthscope.org/news/retirement-of-the-irisws-timeseries-web-service/)。処理内容・対応範囲は[波形の単位・補正ガイド](docs/waveform-units.md)を参照してください。
+
+気象庁は主な地震の公開記録が対象で、すべての検索結果に波形があるわけではありません。FDSNも観測点が見つかることと、指定期間の波形を取得できることは別です。ブラウザからの接続を許可しない配信元（CORS制限）、認証が必要なデータ、未対応の計器応答では取得・変換できません。GeoNetのFDSNは2026年10月3日の確認でCORS許可がなく、ブラウザからの直接取得に制約があります。
 
 ### データダウンロード
 - **CSV** : BOM付きUTF-8でExcelに対応、日本語カラム名
@@ -128,13 +136,16 @@
 | 地図ライブラリ | [Leaflet](https://leafletjs.com/) 1.9.4 |
 | グラフライブラリ | [Chart.js](https://www.chartjs.org/) 4.4.7 |
 | 地図タイル | [OpenStreetMap](https://www.openstreetmap.org/) |
-| データソース | [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/)、[IRIS FDSN Web Services](https://service.iris.edu/)、複数のFDSNデータセンター |
+| データソース | [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/)、[気象庁公開強震記録](https://www.data.jma.go.jp/eqev/data/kyoshin/jishin/index.html)、[EarthScope FDSN Web Services](https://service.earthscope.org/)、複数のFDSNデータセンター |
+| 波形変換 | miniSEED 2復号、StationXML全応答段の周波数領域補正、Web Workerによる計算 |
 | PWA | Service Worker によるオフラインサポート |
 | ホスティング | GitHub Pages |
 | ビルドツール | 不要（静的ファイルのみ） |
-| テスト | Node.js標準テストランナー（外部依存なし） |
+| テスト | Node.js標準テストランナー、同梱のテスト用XMLパーサー（追加インストール不要） |
 
-Leaflet・Chart.jsは固定バージョンをライセンスとともに `vendor/` に同梱しており、起動時のCDN接続は不要です。地図・統計グラフのライブラリが読み込めない場合も検索結果・詳細・ダウンロードは利用でき、表示できない領域には再読み込みの案内が出ます。地震データ取得と背景地図タイルにはインターネット接続が必要です。
+Leaflet・Chart.js・seisplotjsの波形復号部分は固定バージョンをライセンスとともに `vendor/` に同梱しており、起動時のCDN接続は不要です。地図・統計グラフのライブラリが読み込めない場合も検索結果・詳細・ダウンロードは利用でき、表示できない領域には再読み込みの案内が出ます。地震データ取得と背景地図タイルにはインターネット接続が必要です。
+
+波形処理は `js/jma-waveform.js`（気象庁の地震照合・CSV変換）、`js/remote-waveform.js`（FDSN取得）、`js/miniseed.js`（記録の復号・連続性検証）、`js/instrument-response.js`（全応答段の補正）、`js/waveform-worker.js`（補正計算の実行）に分かれています。表示は `js/waveform.js`、応答スペクトルは `js/spectrum.js` が担当します。
 
 ## ローカルでの実行
 
@@ -145,7 +156,7 @@ git clone https://github.com/Takayuki-Minagawa/seismo-watch-lab.git
 cd seismo-watch-lab
 ```
 
-任意のHTTPサーバーで配信するか、`index.html` をブラウザで直接開いてください。
+任意のHTTPサーバーで配信して開いてください。FDSNの補正計算はWeb Workerを使うため、ファイルを直接開く `file://` での実行は対象外です。
 
 ```bash
 # Python の場合
@@ -182,10 +193,14 @@ gh workflow run deploy.yml --ref main
 ## 波形ビューアと応答スペクトルの使い方
 
 1. 地震を検索し、結果テーブルの行をクリックして対象地震を選択します。
-2. `波形ビューア` タブでデータセンター・半径を選び、`観測点を検索` で周辺チャンネルのメタデータを確認します。波形の存在確認は行いません。
-3. [波形の単位・補正ガイド](docs/waveform-units.md)に従い、raw miniSEEDと対応するStationXMLからObsPyで計器補正したASCII2加速度ファイルを作成します。
-4. `加速度波形ファイル（ASCII2）` から読み込み、ヘッダー単位・換算係数・観測点・処理記録を確認します。既にファイルがある場合は地震選択や観測点検索なしで読み込めます。
-5. 必要に応じてズーム範囲を指定し、`応答スペクトル作成` を押します。CSVには単位の確認根拠と入力波形の由来が含まれます。
+2. `波形ビューア` タブでデータセンターと半径を選び、`観測点を検索` を押します。日本の主な地震には `気象庁 公開強震波形`、世界の公開観測網には `IRIS / EarthScope` などを選びます。
+3. 観測点と成分を選び、`取得して表示` を押します。アプリが公式サイトから波形を取得し、加速度へ変換して表示します。気象庁はNS（南北）・EW（東西）・UD（上下）の3成分を選べます。
+4. 単位、記録日時、取得元、補正内容と公開元の注意事項を確認します。FDSNのフィルタを変更する場合は `補正の詳細設定` に4周波数を入力して取得し直します。
+5. 必要に応じて表示範囲を指定し、`応答スペクトル作成` を押します。Sa/Sv/Sdを切り替えて確認し、結果CSVを保存できます。減衰定数を変更した場合は再計算します。
+
+`2011年東北の公開波形を試す` からも、観測点検索を始められます。2026年10月3日には、気象庁の石巻市大瓜・南北成分と、EarthScope配信の `IU.MAJO.20.HN1` について、観測点検索から直接取得・加速度表示・減衰5%の応答スペクトルまでをブラウザで確認しました。すべての配信元・観測点での取得を確認したものではありません。
+
+手元のファイルを使う場合は `手元の加速度ファイルも利用できます` を開き、単位付きASCII2を読み込みます。[ガイド](docs/waveform-units.md)のObsPy変換手順は、この任意のファイル利用向けです。
 
 
 ## データ出典・ライセンス
@@ -201,22 +216,23 @@ gh workflow run deploy.yml --ref main
 | [USGS Earthquake Hazards Program](https://earthquake.usgs.gov/) | 地震データ | パブリックドメイン |
 | [Leaflet](https://leafletjs.com/) | 地図表示ライブラリ | BSD-2-Clause |
 | [Chart.js](https://www.chartjs.org/) | グラフ表示ライブラリ | MIT |
+| [seisplotjs](https://github.com/crotwell/seisplotjs) | miniSEEDのサンプル復号 | MIT |
 | [OpenStreetMap](https://www.openstreetmap.org/copyright) | 地図タイル | ODbL (帰属表示必須) |
 
 ### 参考情報として掲載している外部サイト
 
-- [気象庁](https://www.jma.go.jp/) - 地震情報、震度データベース、震央分布図
+- [気象庁](https://www.jma.go.jp/) - 地震情報、震度データベース、震央分布図、公開強震波形の取得
 - [防災科学技術研究所 (NIED)](https://www.bosai.go.jp/) - K-NET/KiK-net、Hi-net、J-SHIS
 - [IRIS / NSF SAGE (EarthScope)](https://www.iris.edu/hq/) - Seismic Monitor、Web Services (FDSN)、Data Management Center（波形ビューアで利用）
-- [GEOFON / GFZ](https://geofon.gfz-potsdam.de/) - FDSN Web Services（波形ビューア観測点検索で利用）
-- [GeoNet](https://www.geonet.org.nz/) - ニュージーランド地震観測網（波形ビューア観測点検索で利用）
-- [ORFEUS / EIDA](https://www.orfeus-eu.org/) - 欧州統合地震データアーカイブ（波形ビューア観測点検索で利用）
+- [GEOFON / GFZ](https://geofon.gfz-potsdam.de/) - FDSN Web Services（観測点・波形・計器情報の取得先）
+- [GeoNet](https://www.geonet.org.nz/) - ニュージーランド地震観測網（取得は配信元の接続制限に依存）
+- [ORFEUS / EIDA](https://www.orfeus-eu.org/) - 欧州統合地震データアーカイブ（観測点・波形・計器情報の取得先）
 - [EMSC (欧州地中海地震学センター)](https://www.emsc-csem.org/)
 
 各外部サイトのデータ利用については、それぞれの利用規約に従ってください。
 
 ## 免責事項
 
-- 本アプリケーションが表示するデータは USGS API から取得したものであり、その正確性・即時性を保証するものではありません。
+- 地震情報はUSGS、観測点・波形は選択した気象庁・FDSN配信元または読み込んだファイルに由来します。各データの正確性・即時性を保証するものではありません。
 - 地名の日本語翻訳は辞書ベースの簡易的なものです。すべての地名が正確に翻訳されるわけではありません。
 - 防災に関する判断には、気象庁をはじめとする各国の公式機関が発表する情報を必ずご参照ください。

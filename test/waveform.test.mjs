@@ -153,37 +153,29 @@ test('station metadata recognizes both ScaleFrequency and legacy ScaleFreq colum
   }
 });
 
-test('HTTP 200 COUNTS payloads cannot pass the physical-unit check through the fetch path', async () => {
-  const WaveformViewer = loadWaveform({ fetch: async () => ({
-    ok: true, status: 200, text: async () => asciiWaveform('COUNTS'),
-  }) });
-  await assert.rejects(WaveformViewer.fetchWaveformData({
-    network: 'XX', station: 'TEST', location: '', channel: 'HNN',
-  }, '2026-01-01T00:00:00', '2026-01-01T00:00:01'), /COUNTS/);
+test('remote waveform path uses the selected provider and validates returned acceleration', async () => {
+  const calls = [];
+  let data;
+  const WaveformViewer = loadWaveform({ RemoteWaveform: { load: async (...args) => { calls.push(args); return data; } } });
+  data = WaveformViewer.parseWaveformText(asciiWaveform('GAL'));
+  const station = { network: 'XX', station: 'TEST', channel: 'HNN', _datacenter: 'geofon' };
+  await WaveformViewer.fetchWaveformData(station, '2026-01-01T00:00:00', '2026-01-01T00:00:01');
+  assert.equal(calls[0][3].dataUrl, 'https://geofon.gfz.de/fdsnws/dataselect/1/query');
+  await WaveformViewer.fetchWaveformData({...station, _datacenter:'iris'}, '2026-01-01T00:00:00', '2026-01-01T00:00:01');
+  assert.equal(calls.length, 2, 'data center must be part of cache identity');
+  data = {...data,meta:{...data.meta,_inputUnitReported:'COUNTS'}};
+  await assert.rejects(WaveformViewer.fetchWaveformData(station, '2026-01-01T00:00:00', '2026-01-01T00:00:02'), /換算根拠/);
 });
 
-test('retired service responses propagate through station previews instead of appearing as missing data', async () => {
-  const WaveformViewer = loadWaveform({ fetch: async url => new URL(url).pathname.includes('/station/') ? {
-    ok: true, status: 200,
-    text: async () => '#Network|Station|Location|Channel|Latitude|Longitude\nXX|TEST||HNN|35|139',
-  } : {
-    ok: false, status: 404, text: async () => 'This service has been retired',
-  } });
-  await assert.rejects(WaveformViewer.searchStations(35, 139, 5, null, {
-    requireWaveform: true, starttime: '2026-01-01T00:00:00', endtime: '2026-01-01T00:00:01',
-  }), error => error.code === 'SERVICE_RETIRED' && /提供を終了/.test(error.message));
-});
-
-test('retired station services and normal waveform no-data responses stay distinguishable', async () => {
-  const retired = loadWaveform({ fetch: async () => ({
-    ok: false, status: 404, text: async () => 'This service has been retired',
-  }) });
-  await assert.rejects(retired.searchStations(35, 139), error => error.code === 'SERVICE_RETIRED');
-  const missing = loadWaveform({ fetch: async () => ({
-    ok: false, status: 404, text: async () => 'No data found',
-  }) });
-  await assert.rejects(missing.fetchWaveformData({ network: 'XX', station: 'TEST', channel: 'HNN' },
-    '2026-01-01T00:00:00', '2026-01-01T00:00:01'), error => !error.code && /見つかりませんでした/.test(error.message));
+test('raw miniSEED and response-correction evidence are distinct from an acceleration file header', () => {
+  const WaveformViewer = loadWaveform();
+  const data = WaveformViewer.parseWaveformText(asciiWaveform());
+  data.meta._unitEvidence = 'stationxml-response';
+  assert.throws(() => WaveformViewer.validateAccelerationData(data), /換算根拠/);
+  Object.assign(data.meta, {_responseCorrectionApplied:true, _processing:{outputUnits:'M/S**2'}, _responseUrl:'https://example.org/station'});
+  assert.equal(WaveformViewer.validateAccelerationData(data), true);
+  assert.match(WaveformViewer.getWaveformDataURL({network:'IU',station:'ANMO',location:'00',channel:'BHZ'},'2010-01-01','2010-01-02'), /earthscope\.org\/fdsnws\/dataselect/);
+  assert.equal(WaveformViewer.getWaveformImageURL(), '');
 });
 
 test('local waveform display shows the conversion and original header without correction claims or remote links', () => {

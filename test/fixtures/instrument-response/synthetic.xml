@@ -1,0 +1,141 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<FDSNStationXML xmlns="http://www.fdsn.org/xml/station/1" schemaVersion="1.2">
+  <Source>Independent synthetic response regression</Source>
+  <Module>ObsPy 1.5.1</Module>
+  <ModuleURI>https://www.obspy.org</ModuleURI>
+  <Created>2026-10-03T09:08:27.225877Z</Created>
+  <Network code="XX">
+    <Station code="TEST">
+      <Latitude unit="DEGREES">0.0</Latitude>
+      <Longitude unit="DEGREES">0.0</Longitude>
+      <Elevation unit="METERS">0.0</Elevation>
+      <Site>
+        <Name>Synthetic</Name>
+      </Site>
+      <CreationDate>2020-01-01T00:00:00.000000Z</CreationDate>
+      <Channel code="HNN" startDate="2020-01-01T00:00:00.000000Z" locationCode="00">
+        <Latitude unit="DEGREES">0.0</Latitude>
+        <Longitude unit="DEGREES">0.0</Longitude>
+        <Elevation unit="METERS">0.0</Elevation>
+        <Depth unit="METERS">0.0</Depth>
+        <SampleRate>100.0</SampleRate>
+        <Response>
+          <InstrumentSensitivity>
+            <Value>5964.975850863666</Value>
+            <Frequency>1</Frequency>
+            <InputUnits>
+              <Name>CM/S</Name>
+            </InputUnits>
+            <OutputUnits>
+              <Name>COUNTS</Name>
+            </OutputUnits>
+          </InstrumentSensitivity>
+          <Stage number="1">
+            <PolesZeros>
+              <InputUnits>
+                <Name>CM/S</Name>
+              </InputUnits>
+              <OutputUnits>
+                <Name>V</Name>
+              </OutputUnits>
+              <PzTransferFunctionType>LAPLACE (HERTZ)</PzTransferFunctionType>
+              <NormalizationFactor>1.4142135623730951</NormalizationFactor>
+              <NormalizationFrequency unit="HERTZ">1.0</NormalizationFrequency>
+              <Pole number="0">
+                <Real>-1.0</Real>
+                <Imaginary>0.0</Imaginary>
+              </Pole>
+            </PolesZeros>
+            <StageGain>
+              <Value>2</Value>
+              <Frequency>1</Frequency>
+            </StageGain>
+          </Stage>
+          <Stage number="2">
+            <Coefficients>
+              <InputUnits>
+                <Name>V</Name>
+              </InputUnits>
+              <OutputUnits>
+                <Name>V</Name>
+              </OutputUnits>
+              <CfTransferFunctionType>DIGITAL</CfTransferFunctionType>
+              <Numerator>0.2</Numerator>
+              <Numerator>0.1</Numerator>
+              <Denominator>1.0</Denominator>
+              <Denominator>-0.5</Denominator>
+            </Coefficients>
+            <Decimation>
+              <InputSampleRate unit="HERTZ">100.0</InputSampleRate>
+              <Factor>1</Factor>
+              <Offset>0</Offset>
+              <Delay>0.02</Delay>
+              <Correction>0.008</Correction>
+            </Decimation>
+            <StageGain>
+              <Value>3</Value>
+              <Frequency>0</Frequency>
+            </StageGain>
+          </Stage>
+          <Stage number="3">
+            <FIR>
+              <InputUnits>
+                <Name>V</Name>
+              </InputUnits>
+              <OutputUnits>
+                <Name>V</Name>
+              </OutputUnits>
+              <Symmetry>NONE</Symmetry>
+              <NumeratorCoefficient>0.1</NumeratorCoefficient>
+              <NumeratorCoefficient>0.2</NumeratorCoefficient>
+              <NumeratorCoefficient>0.7</NumeratorCoefficient>
+            </FIR>
+            <Decimation>
+              <InputSampleRate unit="HERTZ">100.0</InputSampleRate>
+              <Factor>1</Factor>
+              <Offset>0</Offset>
+              <Delay>0.02</Delay>
+              <Correction>0.008</Correction>
+            </Decimation>
+            <StageGain>
+              <Value>1</Value>
+              <Frequency>0</Frequency>
+            </StageGain>
+          </Stage>
+          <Stage number="4">
+            <PolesZeros>
+              <InputUnits>
+                <Name>V</Name>
+              </InputUnits>
+              <OutputUnits>
+                <Name>COUNTS</Name>
+              </OutputUnits>
+              <PzTransferFunctionType>DIGITAL (Z-TRANSFORM)</PzTransferFunctionType>
+              <NormalizationFactor>0.8</NormalizationFactor>
+              <NormalizationFrequency unit="HERTZ">0.0</NormalizationFrequency>
+              <Zero number="0">
+                <Real>0.0</Real>
+                <Imaginary>0.0</Imaginary>
+              </Zero>
+              <Pole number="0">
+                <Real>0.2</Real>
+                <Imaginary>0.0</Imaginary>
+              </Pole>
+            </PolesZeros>
+            <Decimation>
+              <InputSampleRate unit="HERTZ">100.0</InputSampleRate>
+              <Factor>1</Factor>
+              <Offset>0</Offset>
+              <Delay>0.02</Delay>
+              <Correction>0.008</Correction>
+            </Decimation>
+            <StageGain>
+              <Value>1000</Value>
+              <Frequency>0</Frequency>
+            </StageGain>
+          </Stage>
+        </Response>
+      </Channel>
+    </Station>
+  </Network>
+</FDSNStationXML>

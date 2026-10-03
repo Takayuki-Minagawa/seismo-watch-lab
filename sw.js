@@ -3,7 +3,7 @@
  * アプリシェルのキャッシュとオフライン対応
  */
 const CACHE_PREFIX = 'seismo-watch-';
-const CACHE_NAME = `${CACHE_PREFIX}v8`;
+const CACHE_NAME = `${CACHE_PREFIX}v9`;
 const APP_SHELL = [
   './',
   './index.html',
@@ -20,6 +20,12 @@ const APP_SHELL = [
   './js/detail.js',
   './js/spectrum.js',
   './js/waveform.js',
+  './js/miniseed.js',
+  './js/instrument-response.js',
+  './js/remote-waveform.js',
+  './js/waveform-worker.js',
+  './js/jma-waveform.js',
+  './vendor/seisplotjs-3.2.7/seedcodec.js',
   './favicon.svg',
   './manifest.json',
   './vendor/leaflet-1.9.4/leaflet.css',
