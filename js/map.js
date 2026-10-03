@@ -101,6 +101,15 @@ const EarthquakeMap = (() => {
    * 地図を初期化
    */
   function init(containerId) {
+    // 地図の読込失敗で、後続の検索ボタンや詳細パネルの初期化を止めない。
+    if (typeof L === 'undefined') {
+      const container = document.getElementById(containerId);
+      if (container) {
+        container.innerHTML = '<div id="map-unavailable" class="empty-state" role="status">地図を読み込めませんでした。検索結果の一覧・詳細は利用できます。ページを再読み込みしてください。</div>';
+      }
+      return null;
+    }
+
     map = L.map(containerId, {
       center: [35.68, 139.69], // 東京
       zoom: 3,
@@ -131,7 +140,7 @@ const EarthquakeMap = (() => {
     currentClickCallback = onClickCallback;
     clearMarkers();
 
-    if (!geojson || !geojson.features || geojson.features.length === 0) {
+    if (!map || !markerGroup || !geojson || !geojson.features || geojson.features.length === 0) {
       return;
     }
 

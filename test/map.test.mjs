@@ -3,10 +3,11 @@ import test from 'node:test';
 
 import { createBrowserLikeContext, loadClassicScript } from './helpers/load-classic-script.mjs';
 
-function loadMap() {
+function loadMap({ leafletAvailable = true } = {}) {
   let popupHtml = '';
   const markerOptions = [];
   const elements = new Map([
+    ['map', { innerHTML: '' }],
     ['map-mode-hint', { textContent: '' }],
     ['map-legend', { innerHTML: '' }],
   ]);
@@ -30,7 +31,7 @@ function loadMap() {
     },
   };
   const context = createBrowserLikeContext({
-    L,
+    ...(leafletAvailable ? { L } : {}),
     document: { getElementById: id => elements.get(id) || null },
     I18n: {
       translatePlace: value => value,
@@ -94,4 +95,26 @@ test('map legend and marker colors share the active style definition', () => {
   runtime.EarthquakeMap.setStyleMode('recency');
   assert.match(runtime.elements.get('map-legend').innerHTML, /発生からの経過時間/);
   assert.match(runtime.elements.get('map-mode-hint').textContent, /1時間以内/);
+});
+
+test('missing Leaflet leaves search results and detail selection usable', () => {
+  const runtime = loadMap({ leafletAvailable: false });
+  assert.doesNotThrow(() => runtime.EarthquakeMap.init('map'));
+  assert.match(runtime.elements.get('map').innerHTML, /地図を読み込めませんでした/);
+  assert.match(runtime.elements.get('map').innerHTML, /検索結果の一覧・詳細/);
+
+  const data = {
+    features: [{
+      properties: { mag: 5, time: Date.now(), place: 'Test', tsunami: 0 },
+      geometry: { coordinates: [140, 35, 10] },
+    }],
+  };
+  assert.doesNotThrow(() => {
+    runtime.EarthquakeMap.displayEarthquakes(data);
+    runtime.EarthquakeMap.setStyleMode('depth');
+    runtime.EarthquakeMap.focusOn(35, 140);
+    runtime.EarthquakeMap.invalidateSize();
+    runtime.EarthquakeMap.reset();
+  });
+  assert.equal(runtime.getLastMarkerOptions(), undefined);
 });

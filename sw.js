@@ -3,7 +3,7 @@
  * アプリシェルのキャッシュとオフライン対応
  */
 const CACHE_PREFIX = 'seismo-watch-';
-const CACHE_NAME = `${CACHE_PREFIX}v6`;
+const CACHE_NAME = `${CACHE_PREFIX}v7`;
 const APP_SHELL = [
   './',
   './index.html',
@@ -22,13 +22,14 @@ const APP_SHELL = [
   './js/waveform.js',
   './favicon.svg',
   './manifest.json',
-];
-
-// CDNリソース（ネットワーク優先、フォールバックでキャッシュ）
-const CDN_RESOURCES = [
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
-  'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js',
+  './vendor/leaflet-1.9.4/leaflet.css',
+  './vendor/leaflet-1.9.4/leaflet.js',
+  './vendor/leaflet-1.9.4/images/layers-2x.png',
+  './vendor/leaflet-1.9.4/images/layers.png',
+  './vendor/leaflet-1.9.4/images/marker-icon-2x.png',
+  './vendor/leaflet-1.9.4/images/marker-icon.png',
+  './vendor/leaflet-1.9.4/images/marker-shadow.png',
+  './vendor/chartjs-4.4.7/chart.umd.js',
 ];
 
 async function cacheSuccessfulResponse(response, cacheKey) {
@@ -51,10 +52,7 @@ function withoutSearchOrHash(value) {
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      await cache.addAll(APP_SHELL);
-      await Promise.allSettled(CDN_RESOURCES.map(resource => cache.add(resource)));
-    })
+    caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL))
   );
   self.skipWaiting();
 });
@@ -75,21 +73,10 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const requestUrl = new URL(event.request.url);
-  const isExplicitCdnResource = CDN_RESOURCES.includes(requestUrl.href);
 
-  // API・地図タイルを含む外部リソースは、明示したCDN資産以外キャッシュしない。
-  if (requestUrl.origin !== self.location.origin && !isExplicitCdnResource) {
+  // API・地図タイルを含む外部リソースはキャッシュしない。
+  if (requestUrl.origin !== self.location.origin) {
     event.respondWith(fetch(event.request));
-    return;
-  }
-
-  // CDNリソース: ネットワーク優先、失敗時キャッシュ
-  if (isExplicitCdnResource) {
-    event.respondWith(
-      fetch(event.request)
-        .then(resp => cacheSuccessfulResponse(resp, event.request))
-        .catch(() => caches.match(event.request))
-    );
     return;
   }
 

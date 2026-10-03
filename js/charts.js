@@ -22,6 +22,21 @@ const Charts = (() => {
   ];
   const magLabels = ['M<3', 'M3-4', 'M4-5', 'M5-6', 'M6-7', 'M7-8', 'M8+'];
 
+  function showUnavailable(show) {
+    const grid = document.getElementById('chart-mag')?.closest('.chart-grid');
+    let message = document.getElementById('charts-unavailable');
+    if (show && !message && grid) {
+      message = document.createElement('div');
+      message.id = 'charts-unavailable';
+      message.className = 'empty-state';
+      message.setAttribute('role', 'status');
+      message.textContent = '統計グラフを読み込めませんでした。検索結果の一覧・詳細は利用できます。ページを再読み込みしてください。';
+      grid.before(message);
+    }
+    if (message) message.hidden = !show;
+    if (grid) grid.style.display = show ? 'none' : '';
+  }
+
   /**
    * 全チャートを描画
    */
@@ -30,6 +45,13 @@ const Charts = (() => {
       clearAll();
       return;
     }
+    // グラフの読込失敗を地震データの取得失敗として扱わない。
+    if (typeof Chart !== 'function') {
+      clearAll();
+      showUnavailable(true);
+      return;
+    }
+    showUnavailable(false);
     const features = geojson.features;
 
     renderMagnitudeDistribution(features);
@@ -278,6 +300,7 @@ const Charts = (() => {
       if (c) c.destroy();
     });
     magChart = depthChart = timelineChart = magDepthChart = null;
+    showUnavailable(false);
   }
 
   /**
